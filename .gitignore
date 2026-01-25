@@ -1,0 +1,10 @@
+# IDE
+.idea/
+
+# Gradle
+.gradle/
+build/
+
+# OS
+.DS_Store
+
