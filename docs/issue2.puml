@@ -1,0 +1,258 @@
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam linetype ortho
+
+title Ch06.02: 모놀리식 설계 핵심 메시지 (4가지)
+
+' ==========================================
+' 1. 단방향 의존성 (Unidirectional Dependency)
+' ==========================================
+package "1. 단방향 의존성" {
+    class "Controller Layer" as Controller #LightBlue
+    interface "Service Interface" as ServiceI #LightGreen
+    class "Service Implementation" as ServiceImpl #LightGreen
+    interface "Repository Interface" as RepoI #LightYellow
+    class "Repository Implementation" as RepoImpl #LightYellow
+    class "Domain Layer" as Domain #LightCoral
+    
+    Controller --> ServiceI : 의존
+    ServiceImpl ..|> ServiceI : 구현
+    ServiceImpl --> RepoI : 의존
+    RepoImpl ..|> RepoI : 구현
+    RepoImpl --> Domain : 사용
+    
+    note right of Controller
+        HTTP 요청/응답 처리
+        입력 검증
+    end note
+    
+    note right of ServiceI
+        비즈니스 로직 인터페이스
+        DIP 적용
+    end note
+    
+    note right of RepoI
+        데이터 접근 인터페이스
+        DIP 적용
+    end note
+    
+    note right of Domain
+        도메인 엔티티
+        비즈니스 로직 포함
+    end note
+}
+
+' ==========================================
+' 2. 인터페이스 기반 설계 (DIP)
+' ==========================================
+package "2. 인터페이스 기반 설계 (DIP)" {
+    class "OrderController\n고수준 모듈" as OC #LightBlue
+    interface "OrderService\n인터페이스" as OSI #LightGreen
+    class "OrderServiceImpl\n저수준 모듈" as OSIImpl #LightGreen
+    
+    OC --> OSI : 의존 (추상화)
+    OSIImpl ..|> OSI : 구현
+    
+    note right of OC
+        고수준 모듈
+        인터페이스에만 의존
+    end note
+    
+    note right of OSI
+        추상화 (인터페이스)
+        DIP 원칙 적용
+    end note
+    
+    note right of OSIImpl
+        저수준 모듈 (구현체)
+        런타임에 주입
+    end note
+}
+
+' ==========================================
+' 3. Domain 중심 설계
+' ==========================================
+package "3. Domain 중심 설계" {
+    class "Order\nDomain Entity" as Order #LightCoral
+    class "OrderRepository" as OR #LightYellow
+    class "OrderService" as OS #LightGreen
+    class "OrderController" as OC2 #LightBlue
+    
+    Order <-- OR : 저장/조회
+    Order <-- OS : 비즈니스 로직 처리
+    Order <-- OC2 : 외부 노출
+    
+    note right of Order
+        Domain이 핵심
+        Rich Domain Model
+        비즈니스 로직 포함
+    end note
+    
+    note bottom of OR
+        Domain을 저장/조회
+    end note
+    
+    note bottom of OS
+        Domain의 비즈니스 로직 처리
+    end note
+    
+    note bottom of OC2
+        Domain을 외부에 노출
+    end note
+}
+
+' ==========================================
+' 4. 계층별 책임 분리
+' ==========================================
+package "4. 계층별 책임 분리" {
+    package "Controller Layer\n(표현 계층)" as CL {
+        class "HTTP 처리" as HTTP
+        class "입력 검증" as VALID
+        class "DTO 변환" as DTO
+    }
+    
+    package "Service Layer\n(비즈니스 로직 계층)" as SL {
+        class "비즈니스 로직" as BL
+        class "트랜잭션 관리" as TX
+        class "Repository 조합" as REPO
+    }
+    
+    package "Repository Layer\n(데이터 접근 계층)" as RL {
+        class "CRUD 작업" as CRUD
+        class "쿼리 메서드" as QUERY
+        class "영속성 관리" as PERSIST
+    }
+    
+    package "Domain Layer\n(도메인 모델)" as DL {
+        class "엔티티 정의" as ENTITY
+        class "비즈니스 규칙" as RULE
+        class "도메인 로직" as LOGIC
+    }
+    
+    CL --> SL
+    SL --> RL
+    RL --> DL
+    
+    note right of CL
+        책임: HTTP 처리
+        하지 말 것:
+        - 비즈니스 로직 ❌
+        - DB 직접 접근 ❌
+    end note
+    
+    note right of SL
+        책임: 비즈니스 로직
+        하지 말 것:
+        - HTTP 처리 ❌
+        - SQL 직접 작성 ❌
+    end note
+    
+    note right of RL
+        책임: 데이터 접근
+        하지 말 것:
+        - 비즈니스 로직 ❌
+        - HTTP 처리 ❌
+    end note
+    
+    note right of DL
+        책임: 도메인 모델
+        Rich Domain Model
+        비즈니스 로직 포함
+    end note
+}
+
+' ==========================================
+' 전체 아키텍처 통합 다이어그램
+' ==========================================
+newpage
+
+title 전체 레이어드 아키텍처
+
+package "Layered Architecture" {
+    class "Controller" as C #LightBlue
+    interface "Service Interface" as SI #LightGreen
+    class "Service Implementation" as SImpl #LightGreen
+    interface "Repository Interface" as RI #LightYellow
+    class "Repository Implementation" as RImpl #LightYellow
+    class "Domain" as D #LightCoral
+    class "Database" as DB #LightGray
+    
+    C --> SI : 의존
+    SImpl ..|> SI : 구현
+    SImpl --> RI : 의존
+    RImpl ..|> RI : 구현
+    RImpl --> D : 사용
+    RImpl --> DB : 접근
+    
+    note right of C
+        HTTP 요청/응답
+        입력 검증
+        DTO 변환
+    end note
+    
+    note right of SI
+        비즈니스 로직 인터페이스
+        DIP 적용
+    end note
+    
+    note right of RI
+        데이터 접근 인터페이스
+        DIP 적용
+    end note
+    
+    note right of D
+        도메인 엔티티
+        비즈니스 로직
+        Rich Domain Model
+    end note
+}
+
+@enduml
+
+' ==========================================
+' 시퀀스 다이어그램: 주문 생성
+' ==========================================
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title 주문 생성 시퀀스 다이어그램
+
+actor Client
+participant "OrderController" as OC
+participant "OrderService" as OS
+participant "OrderRepository" as OR
+participant "Database" as DB
+
+Client -> OC: POST /api/orders\n(OrderCreateRequest)
+activate OC
+
+OC -> OC: @Valid 검증
+OC -> OS: createOrder(request)
+activate OS
+
+OS -> OS: Order 엔티티 생성
+OS -> OR: save(order)
+activate OR
+
+OR -> DB: INSERT INTO orders
+activate DB
+DB --> OR: Order Entity
+deactivate DB
+
+OR --> OS: Order Entity
+deactivate OR
+
+OS -> OS: OrderResponse 변환
+OS --> OC: OrderResponse
+deactivate OS
+
+OC --> Client: 201 Created\n(OrderResponse)
+deactivate OC
+
+@enduml
+
