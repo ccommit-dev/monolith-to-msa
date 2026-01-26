@@ -1,3 +1,49 @@
 spring:
   application:
     name: monolith-to-msa
+  
+  # Database 설정
+  datasource:
+    # 메모리 DB (개발용 - 애플리케이션 종료 시 데이터 삭제)
+    url: jdbc:h2:mem:testdb
+    # 파일 DB 사용 시 아래 주석 해제
+    # url: jdbc:h2:file:./data/testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: sa
+  
+  # JPA 설정
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.H2Dialect
+  
+  # H2 Console
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true
+        trace: false
+
+# Actuator 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+# Server 설정
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-binding-errors: always
