@@ -1,0 +1,457 @@
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.03: 도메인 모델링 - ERD
+
+' ==========================================
+' ERD: Order와 Payment 관계
+' ==========================================
+entity "orders" as Orders {
+    * id : BIGINT <<PK>>
+    --
+    * customer_id : VARCHAR(255)
+    * product_id : VARCHAR(255)
+    * quantity : INT
+    * total_price : BIGINT
+    * status : VARCHAR(50)
+    * created_at : TIMESTAMP
+    * updated_at : TIMESTAMP
+}
+
+entity "payments" as Payments {
+    * id : BIGINT <<PK>>
+    --
+    * order_id : BIGINT <<FK>>
+    * amount : BIGINT
+    * method : VARCHAR(50)
+    * status : VARCHAR(50)
+    transaction_id : VARCHAR(255) <<UNIQUE>>
+    paid_at : TIMESTAMP
+    * created_at : TIMESTAMP
+    * updated_at : TIMESTAMP
+}
+
+Orders ||--o{ Payments : "1:N\n(하나의 주문은 여러 결제를 가짐)"
+
+note right of Orders
+    주문 엔티티
+    - @Entity
+    - @Table(name = "orders")
+    - @OneToMany(mappedBy = "order")
+end note
+
+note right of Payments
+    결제 엔티티
+    - @Entity
+    - @Table(name = "payments")
+    - @ManyToOne(fetch = LAZY)
+    - @JoinColumn(name = "order_id")
+end note
+
+@enduml
+
+' ==========================================
+' 영속성 컨텍스트: 1차 캐시
+' ==========================================
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title 영속성 컨텍스트: 1차 캐시
+
+participant "Application" as App
+participant "Repository" as Repo
+participant "EntityManager" as EM
+database "Database" as DB
+storage "1차 캐시" as Cache
+
+App -> Repo: findById(1L)
+activate Repo
+
+Repo -> EM: find(Order.class, 1L)
+activate EM
+
+EM -> Cache: 캐시 확인
+activate Cache
+
+Cache --> EM: 캐시에 없음
+deactivate Cache
+
+EM -> DB: SELECT * FROM orders WHERE id = 1
+activate DB
+DB --> EM: Order Entity
+deactivate DB
+
+EM -> Cache: 1차 캐시에 저장
+activate Cache
+Cache --> EM: 저장 완료
+deactivate Cache
+
+EM --> Repo: Order Entity
+deactivate EM
+Repo --> App: Order Entity
+deactivate Repo
+
+note right of Cache
+    1차 캐시에 저장됨
+    같은 엔티티 조회 시
+    DB 조회 없이 반환
+end note
+
+App -> Repo: findById(1L) (두 번째 조회)
+activate Repo
+
+Repo -> EM: find(Order.class, 1L)
+activate EM
+
+EM -> Cache: 캐시 확인
+activate Cache
+
+Cache --> EM: 캐시에서 반환
+deactivate Cache
+
+EM --> Repo: Order Entity (캐시에서)
+deactivate EM
+Repo --> App: Order Entity
+deactivate Repo
+
+note right of Cache
+    DB 조회 없이
+    1차 캐시에서 즉시 반환
+    동일성 보장
+end note
+
+@enduml
+
+' ==========================================
+' 영속성 컨텍스트: 변경 감지 (Dirty Checking)
+' ==========================================
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title 영속성 컨텍스트: 변경 감지 (Dirty Checking)
+
+participant "Application" as App
+participant "Repository" as Repo
+participant "EntityManager" as EM
+storage "1차 캐시\n(스냅샷)" as Cache
+database "Database" as DB
+
+App -> Repo: findById(1L)
+activate Repo
+
+Repo -> EM: find(Order.class, 1L)
+activate EM
+
+EM -> DB: SELECT * FROM orders WHERE id = 1
+activate DB
+DB --> EM: Order Entity
+deactivate DB
+
+EM -> Cache: 엔티티 저장 + 스냅샷 생성
+activate Cache
+Cache --> EM: 저장 완료
+deactivate Cache
+
+EM --> Repo: Order Entity
+deactivate EM
+Repo --> App: Order Entity
+deactivate Repo
+
+App -> App: order.updateStatus(CONFIRMED)
+note right of App
+    엔티티 수정
+    (영속 상태)
+end note
+
+App -> EM: 트랜잭션 커밋
+activate EM
+
+EM -> Cache: 스냅샷과 비교
+activate Cache
+
+Cache --> EM: 변경 감지됨
+deactivate Cache
+
+EM -> EM: UPDATE 쿼리 생성
+note right of EM
+    UPDATE orders
+    SET status = 'CONFIRMED'
+    WHERE id = 1
+end note
+
+EM -> DB: UPDATE 실행
+activate DB
+DB --> EM: 업데이트 완료
+deactivate DB
+
+EM --> App: 커밋 완료
+deactivate EM
+
+note right of Cache
+    변경 감지 (Dirty Checking)
+    - 스냅샷과 현재 상태 비교
+    - 변경 시 자동 UPDATE
+    - save() 호출 불필요
+end note
+
+@enduml
+
+' ==========================================
+' 영속성 컨텍스트: 쓰기 지연 (Write Behind)
+' ==========================================
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title 영속성 컨텍스트: 쓰기 지연 (Write Behind)
+
+participant "Application" as App
+participant "Repository" as Repo
+participant "EntityManager" as EM
+storage "쓰기 지연\nSQL 저장소" as SQLStore
+database "Database" as DB
+
+App -> Repo: save(order1)
+activate Repo
+
+Repo -> EM: persist(order1)
+activate EM
+
+EM -> SQLStore: INSERT 쿼리 저장
+activate SQLStore
+note right of SQLStore
+    INSERT INTO orders ...
+    (아직 실행 안 됨)
+end note
+SQLStore --> EM: 저장 완료
+deactivate SQLStore
+
+EM --> Repo: 완료
+deactivate EM
+Repo --> App: 완료
+deactivate Repo
+
+App -> Repo: save(order2)
+activate Repo
+
+Repo -> EM: persist(order2)
+activate EM
+
+EM -> SQLStore: INSERT 쿼리 저장
+activate SQLStore
+note right of SQLStore
+    INSERT INTO orders ...
+    (아직 실행 안 됨)
+end note
+SQLStore --> EM: 저장 완료
+deactivate SQLStore
+
+EM --> Repo: 완료
+deactivate EM
+Repo --> App: 완료
+deactivate Repo
+
+App -> EM: 트랜잭션 커밋
+activate EM
+
+EM -> SQLStore: 모든 쿼리 가져오기
+activate SQLStore
+SQLStore --> EM: INSERT 쿼리 2개
+deactivate SQLStore
+
+EM -> DB: 배치 INSERT 실행
+activate DB
+note right of DB
+    INSERT INTO orders ...
+    INSERT INTO orders ...
+    (한 번에 실행)
+end note
+DB --> EM: 실행 완료
+deactivate DB
+
+EM --> App: 커밋 완료
+deactivate EM
+
+note right of SQLStore
+    쓰기 지연 (Write Behind)
+    - 즉시 실행하지 않음
+    - SQL 저장소에 보관
+    - 커밋 시점에 배치 실행
+    - 성능 최적화
+end note
+
+@enduml
+
+' ==========================================
+' 영속성 전이 (Cascade): Order 저장 시 Payment도 함께 저장
+' ==========================================
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title 영속성 전이 (Cascade): Order 저장 시 Payment도 함께 저장
+
+participant "Application" as App
+participant "Repository" as Repo
+participant "EntityManager" as EM
+database "Database" as DB
+
+App -> App: Order 생성 (비영속)
+note right of App
+    Order order = Order.builder()...
+    Payment payment = Payment.builder()...
+    order.addPayment(payment)
+end note
+
+App -> Repo: save(order)
+activate Repo
+
+Repo -> EM: persist(order)
+activate EM
+
+EM -> EM: Order 영속화
+note right of EM
+    @OneToMany(cascade = ALL)
+    연관된 Payment도 함께 영속화
+end note
+
+EM -> EM: Payment 영속화 (CASCADE)
+note right of EM
+    CascadeType.ALL
+    부모 저장 시 자식도 저장
+end note
+
+EM -> DB: INSERT INTO orders
+activate DB
+DB --> EM: Order 저장 완료
+deactivate DB
+
+EM -> DB: INSERT INTO payments
+activate DB
+DB --> EM: Payment 저장 완료
+deactivate DB
+
+EM --> Repo: 완료
+deactivate EM
+Repo --> App: 완료
+deactivate Repo
+
+note right of EM
+    영속성 전이 (Cascade)
+    - 부모만 저장해도 자식 저장
+    - CascadeType.ALL 사용
+    - 편리한 연관관계 관리
+end note
+
+@enduml
+
+' ==========================================
+' 핵심 메시지 4가지
+' ==========================================
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title 핵심 메시지 4가지
+
+package "1. 엔티티 설계 원칙" {
+    class "@Entity" as Entity {
+        + JPA 엔티티 지정
+        + 테이블과 매핑
+    }
+    
+    class "@Table" as Table {
+        + 테이블명 지정
+        + 스키마 지정
+    }
+    
+    class "@Column" as Column {
+        + 컬럼 제약조건
+        + nullable, length 등
+    }
+    
+    class "비즈니스 로직" as Logic {
+        + 엔티티에 포함
+        + Rich Domain Model
+    }
+    
+    Entity --> Table
+    Table --> Column
+    Column --> Logic
+}
+
+package "2. 관계 설정 원칙" {
+    class "@OneToMany" as OneToMany {
+        + 일대다 관계
+        + mappedBy
+        + cascade
+    }
+    
+    class "@ManyToOne" as ManyToOne {
+        + 다대일 관계
+        + @JoinColumn
+        + fetch
+    }
+    
+    class "연관관계 주인" as Owner {
+        + 외래키 관리
+        + 양방향 관계
+    }
+    
+    OneToMany --> Owner
+    ManyToOne --> Owner
+}
+
+package "3. 영속성 컨텍스트 활용" {
+    class "1차 캐시" as Cache {
+        + 엔티티 저장
+        + 동일성 보장
+    }
+    
+    class "변경 감지" as Dirty {
+        + 자동 UPDATE
+        + 스냅샷 비교
+    }
+    
+    class "쓰기 지연" as Write {
+        + 배치 처리
+        + 성능 최적화
+    }
+    
+    Cache --> Dirty
+    Dirty --> Write
+}
+
+package "4. DDL 설계 원칙" {
+    class "제약조건" as Constraint {
+        + PRIMARY KEY
+        + FOREIGN KEY
+        + UNIQUE
+        + CHECK
+    }
+    
+    class "인덱스" as Index {
+        + 조회 성능
+        + 복합 인덱스
+    }
+    
+    class "데이터 무결성" as Integrity {
+        + 참조 무결성
+        + 값 검증
+    }
+    
+    Constraint --> Index
+    Index --> Integrity
+}
+
+@enduml
+

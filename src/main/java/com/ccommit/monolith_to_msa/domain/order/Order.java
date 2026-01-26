@@ -1,5 +1,6 @@
 package com.ccommit.monolith_to_msa.domain.order;
 
+import com.ccommit.monolith_to_msa.domain.payment.Payment;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -7,6 +8,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "orders")
@@ -33,6 +36,9 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private OrderStatus status;
+
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Payment> payments = new ArrayList<>();
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -64,7 +70,26 @@ public class Order {
     }
 
     public void cancel() {
+        if (this.status == OrderStatus.DELIVERED) {
+            throw new IllegalStateException("배송 완료된 주문은 취소할 수 없습니다");
+        }
         this.status = OrderStatus.CANCELLED;
+    }
+
+    public void addPayment(Payment payment) {
+        this.payments.add(payment);
+        payment.setOrder(this);
+    }
+
+    public Long getTotalPaymentAmount() {
+        return payments.stream()
+                .filter(Payment::isCompleted)
+                .mapToLong(Payment::getAmount)
+                .sum();
+    }
+
+    public boolean isFullyPaid() {
+        return getTotalPaymentAmount() >= totalPrice;
     }
 }
 
