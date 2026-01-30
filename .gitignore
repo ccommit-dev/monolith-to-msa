@@ -44,3 +44,6 @@ out/
 
 ### Logs ###
 *.log
+
+### Backup files ###
+*.bak

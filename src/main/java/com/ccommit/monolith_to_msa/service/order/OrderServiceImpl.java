@@ -2,9 +2,13 @@ package com.ccommit.monolith_to_msa.service.order;
 
 import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.order.OrderStatus;
+import com.ccommit.monolith_to_msa.domain.product.Product;
 import com.ccommit.monolith_to_msa.dto.order.OrderCreateRequest;
 import com.ccommit.monolith_to_msa.dto.order.OrderResponse;
+import com.ccommit.monolith_to_msa.exception.InsufficientStockException;
+import com.ccommit.monolith_to_msa.exception.ProductNotFoundException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
+import com.ccommit.monolith_to_msa.repository.product.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,10 +26,28 @@ import java.util.stream.Collectors;
 public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
+    private final ProductRepository productRepository;
 
     @Override
     @Transactional
     public OrderResponse createOrder(OrderCreateRequest request) {
+        // 1. 상품 조회 (비관적 락 사용 - 동시성 제어)
+        Product product = productRepository.findByProductIdWithLock(request.getProductId())
+                .orElseThrow(() -> new ProductNotFoundException(request.getProductId()));
+
+        // 2. 재고 확인
+        if (!product.isStockAvailable(request.getQuantity())) {
+            throw new InsufficientStockException(
+                    request.getProductId(),
+                    request.getQuantity(),
+                    product.getStock()
+            );
+        }
+
+        // 3. 재고 차감
+        product.decreaseStock(request.getQuantity());
+
+        // 4. 주문 생성
         Order order = Order.builder()
                 .customerId(request.getCustomerId())
                 .productId(request.getProductId())
@@ -34,7 +56,9 @@ public class OrderServiceImpl implements OrderService {
                 .status(OrderStatus.PENDING)
                 .build();
 
+        // 5. 주문 저장
         Order savedOrder = orderRepository.save(order);
+
         return OrderResponse.from(savedOrder);
     }
 

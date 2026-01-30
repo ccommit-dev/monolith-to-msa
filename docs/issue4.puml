@@ -1,0 +1,360 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.04: 주문 생성 시퀀스 다이어그램 (재고 차감 + 주문 생성)
+
+actor Client
+participant "OrderController" as Controller
+participant "OrderService" as Service
+participant "ProductRepository" as ProductRepo
+participant "Product\n(재고)" as Product
+participant "OrderRepository" as OrderRepo
+participant "Order\n(주문)" as Order
+
+Client -> Controller: POST /api/orders\n(OrderCreateRequest)
+activate Controller
+
+Controller -> Controller: @Valid 검증
+Controller -> Service: createOrder(request)
+activate Service
+
+note right of Service
+    @Transactional
+    전체 작업을 하나의
+    트랜잭션으로 처리
+end note
+
+Service -> ProductRepo: findByProductIdWithLock(productId)
+activate ProductRepo
+
+ProductRepo -> Product: SELECT ... FOR UPDATE\n(비관적 락)
+activate Product
+Product --> ProductRepo: Product Entity
+deactivate Product
+
+ProductRepo --> Service: Product Entity
+deactivate ProductRepo
+
+Service -> Service: 재고 확인\nisStockAvailable(quantity)
+
+alt 재고 부족
+    Service --> Controller: InsufficientStockException
+    Controller --> Client: 400 Bad Request
+    note right of Service
+        트랜잭션 롤백
+        재고 차감 안 됨
+    end note
+else 재고 충분
+    Service -> Product: decreaseStock(quantity)
+    activate Product
+    note right of Product
+        재고 차감
+        (아직 DB 반영 안 됨)
+    end note
+    Product --> Service: 완료
+    deactivate Product
+
+    Service -> Service: Order 엔티티 생성
+    Service -> OrderRepo: save(order)
+    activate OrderRepo
+
+    OrderRepo -> Order: INSERT INTO orders
+    activate Order
+    Order --> OrderRepo: Order Entity
+    deactivate Order
+
+    OrderRepo --> Service: Order Entity
+    deactivate OrderRepo
+
+    Service -> Service: OrderResponse 변환
+    Service --> Controller: OrderResponse
+    deactivate Service
+
+    note right of Service
+        트랜잭션 커밋
+        - 재고 차감 UPDATE
+        - 주문 INSERT
+        모두 성공 또는 모두 롤백
+    end note
+
+    Controller --> Client: 201 Created\n(OrderResponse)
+end
+deactivate Controller
+
+@enduml
+
+' ==========================================
+' 트랜잭션 롤백 시나리오
+' ==========================================
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title 트랜잭션 롤백 시나리오
+
+participant "OrderService" as Service
+participant "ProductRepository" as ProductRepo
+participant "Product" as Product
+participant "OrderRepository" as OrderRepo
+participant "Order" as Order
+participant "트랜잭션\n컨텍스트" as TX
+
+Service -> ProductRepo: findByProductIdWithLock()
+activate ProductRepo
+ProductRepo -> Product: SELECT FOR UPDATE
+Product --> ProductRepo: Product Entity
+ProductRepo --> Service: Product Entity
+deactivate ProductRepo
+
+Service -> Product: decreaseStock(quantity)
+activate Product
+note right of Product
+    재고 차감
+    (트랜잭션 컨텍스트에만 반영)
+end note
+Product --> Service: 완료
+deactivate Product
+
+Service -> OrderRepo: save(order)
+activate OrderRepo
+
+OrderRepo -> Order: INSERT INTO orders
+activate Order
+
+Order --> OrderRepo: DB 오류 발생!
+deactivate Order
+
+OrderRepo --> Service: RuntimeException
+deactivate OrderRepo
+
+Service -> TX: 트랜잭션 롤백
+activate TX
+note right of TX
+    모든 변경사항 롤백
+    - 재고 차감 취소
+    - 주문 생성 취소
+    원자성 보장
+end note
+TX --> Service: 롤백 완료
+deactivate TX
+
+Service --> Service: 예외 전파
+
+@enduml
+
+' ==========================================
+' 동시성 제어: 비관적 락
+' ==========================================
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title 동시성 제어: 비관적 락 (PESSIMISTIC_WRITE)
+
+participant "요청 1" as Req1
+participant "OrderService" as Service1
+participant "요청 2" as Req2
+participant "OrderService" as Service2
+participant "Product\n(재고: 10)" as Product
+
+Req1 -> Service1: createOrder()\n(수량: 5)
+activate Service1
+
+Service1 -> Product: SELECT ... FOR UPDATE\n(락 획득)
+activate Product
+Product --> Service1: Product (락 보유)
+note right of Product
+    비관적 락
+    다른 트랜잭션은
+    대기 상태
+end note
+
+Req2 -> Service2: createOrder()\n(수량: 6)
+activate Service2
+
+Service2 -> Product: SELECT ... FOR UPDATE\n(락 대기)
+activate Product
+note right of Product
+    요청 1이 락을
+    보유 중이므로
+    대기
+end note
+
+Service1 -> Product: decreaseStock(5)\n재고: 10 → 5
+Product --> Service1: 완료
+deactivate Product
+
+Service1 -> Service1: 주문 저장
+Service1 -> Product: 트랜잭션 커밋\n(락 해제)
+activate Product
+Product --> Service1: 커밋 완료
+deactivate Product
+deactivate Service1
+
+Product --> Service2: 락 획득
+activate Product
+Service2 -> Product: SELECT ... FOR UPDATE\n(락 획득)
+Product --> Service2: Product (재고: 5)
+deactivate Product
+
+Service2 -> Product: decreaseStock(6)
+activate Product
+note right of Product
+    재고 부족!
+    (5 < 6)
+    예외 발생
+end note
+Product --> Service2: InsufficientStockException
+deactivate Product
+
+Service2 --> Req2: 400 Bad Request
+deactivate Service2
+
+@enduml
+
+' ==========================================
+' 예외 처리 흐름
+' ==========================================
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title 예외 처리 흐름
+
+participant "Client" as Client
+participant "OrderController" as Controller
+participant "OrderService" as Service
+participant "GlobalExceptionHandler" as Handler
+
+Client -> Controller: POST /api/orders
+activate Controller
+
+Controller -> Service: createOrder(request)
+activate Service
+
+alt 상품 없음
+    Service -> Service: ProductNotFoundException 발생
+    Service --> Controller: ProductNotFoundException
+    Controller --> Handler: 예외 전파
+    activate Handler
+    Handler -> Handler: 404 Not Found로 변환
+    Handler --> Client: 404 Not Found\n{"error": "Product Not Found"}
+    deactivate Handler
+else 재고 부족
+    Service -> Service: InsufficientStockException 발생
+    Service --> Controller: InsufficientStockException
+    Controller --> Handler: 예외 전파
+    activate Handler
+    Handler -> Handler: 400 Bad Request로 변환
+    Handler --> Client: 400 Bad Request\n{"error": "Insufficient Stock"}
+    deactivate Handler
+else 입력 검증 오류
+    Controller -> Controller: MethodArgumentNotValidException
+    Controller --> Handler: 예외 전파
+    activate Handler
+    Handler -> Handler: 400 Bad Request로 변환
+    Handler --> Client: 400 Bad Request\n{"error": "Validation Error"}
+    deactivate Handler
+end
+
+deactivate Service
+deactivate Controller
+
+note right of Handler
+    @RestControllerAdvice
+    전역 예외 처리
+    일관된 에러 응답
+end note
+
+@enduml
+
+' ==========================================
+' 핵심 메시지 4가지
+' ==========================================
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title 핵심 메시지 4가지
+
+package "1. 트랜잭션 관리 (ACID)" {
+    class Atomicity {
+        모든 작업 성공 또는 모두 실패
+        @Transactional
+    }
+    
+    class Consistency {
+        데이터 무결성 유지
+        제약조건 검증
+    }
+    
+    class Isolation {
+        동시성 제어
+        비관적 락
+    }
+    
+    class Durability {
+        커밋 후 영구 저장
+        트랜잭션 로그
+    }
+    
+    Atomicity --> Consistency
+    Consistency --> Isolation
+    Isolation --> Durability
+}
+
+package "2. 비즈니스 로직 순서" {
+    class Step1 as "1. 상품 조회\n(비관적 락)"
+    class Step2 as "2. 재고 확인"
+    class Step3 as "3. 재고 차감"
+    class Step4 as "4. 주문 생성"
+    class Step5 as "5. 주문 저장"
+    
+    Step1 --> Step2
+    Step2 --> Step3
+    Step3 --> Step4
+    Step4 --> Step5
+}
+
+package "3. 예외 처리 전략" {
+    class CustomException as "Custom Exception" {
+        명확한 에러 메시지
+        계층 구조
+    }
+    
+    class RestControllerAdvice as "@RestControllerAdvice" {
+        전역 예외 처리
+        HTTP 상태 코드 매핑
+    }
+    
+    class ErrorResponse as "일관된 에러 응답" {
+        표준 형식
+        timestamp, status, error, message
+    }
+    
+    CustomException --> RestControllerAdvice
+    RestControllerAdvice --> ErrorResponse
+}
+
+package "4. 단위 테스트 작성" {
+    class Given {
+        테스트 데이터
+        Mock 설정
+    }
+    
+    class When {
+        테스트 메서드 호출
+    }
+    
+    class Then {
+        결과 검증
+        Mock 호출 확인
+    }
+    
+    Given --> When
+    When --> Then
+}
+
+@enduml
+
