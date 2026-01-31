@@ -1,0 +1,5 @@
+spring:
+  # 테스트 환경에서는 simple 캐시 사용 (Redis 불필요)
+  cache:
+    type: simple
+
