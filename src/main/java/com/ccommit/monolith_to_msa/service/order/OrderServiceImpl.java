@@ -63,6 +63,13 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    public List<OrderResponse> getAllOrders() {
+        return orderRepository.findAll().stream()
+                .map(OrderResponse::from)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public OrderResponse getOrder(Long id) {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("주문을 찾을 수 없습니다: " + id));

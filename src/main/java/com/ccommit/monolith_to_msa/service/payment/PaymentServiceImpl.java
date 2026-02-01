@@ -43,15 +43,8 @@ public class PaymentServiceImpl implements PaymentService {
         Order order = orderRepository.findById(request.getOrderId())
                 .orElseThrow(() -> new OrderException("주문을 찾을 수 없습니다: " + request.getOrderId()));
         
-        // 2. 결제 엔티티 생성 (PENDING 상태)
-        Payment payment = Payment.builder()
-                .order(order)
-                .amount(request.getAmount())
-                .method(request.getMethod())
-                .status(PaymentStatus.PENDING)
-                .build();
-        
-        Payment savedPayment = paymentRepository.save(payment);
+        // 2. 결제 엔티티 생성 (PENDING 상태) - 별도 트랜잭션으로 저장
+        Payment savedPayment = savePaymentEntity(order, request);
         log.info("결제 엔티티 생성: 결제ID={}, 상태={}", savedPayment.getId(), savedPayment.getStatus());
         
         try {
@@ -62,20 +55,53 @@ public class PaymentServiceImpl implements PaymentService {
             );
             
             // 4. 결제 완료 처리
-            savedPayment.complete(transactionId);
-            paymentRepository.save(savedPayment);
+            Payment completedPayment = updatePaymentStatus(savedPayment.getId(), PaymentStatus.COMPLETED, transactionId);
             
-            log.info("결제 완료: 결제ID={}, 거래ID={}", savedPayment.getId(), transactionId);
-            return PaymentResponse.from(savedPayment);
+            log.info("결제 완료: 결제ID={}, 거래ID={}", completedPayment.getId(), transactionId);
+            return PaymentResponse.from(completedPayment);
             
         } catch (PaymentGatewayException e) {
-            // 5. 결제 실패 처리
+            // 5. 결제 실패 처리 - 실패 상태로 저장
             log.error("PG사 결제 실패: 결제ID={}, 오류={}", savedPayment.getId(), e.getMessage());
-            savedPayment.fail();
-            paymentRepository.save(savedPayment);
+            updatePaymentStatus(savedPayment.getId(), PaymentStatus.FAILED, null);
             
+            // 실패한 결제도 저장되었으므로 예외를 throw
             throw new OrderException("결제 처리에 실패했습니다: " + e.getMessage(), e);
         }
+    }
+    
+    /**
+     * 결제 엔티티 저장 (별도 트랜잭션으로 저장하여 롤백 방지)
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public Payment savePaymentEntity(Order order, PaymentCreateRequest request) {
+        Payment payment = Payment.builder()
+                .order(order)
+                .amount(request.getAmount())
+                .method(request.getMethod())
+                .status(PaymentStatus.PENDING)
+                .build();
+        
+        return paymentRepository.save(payment);
+    }
+    
+    /**
+     * 결제 상태 업데이트 (별도 트랜잭션으로 저장하여 롤백 방지)
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public Payment updatePaymentStatus(Long paymentId, PaymentStatus status, String transactionId) {
+        // detached 엔티티 문제 방지를 위해 ID로 다시 조회
+        Payment payment = paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new OrderException("결제를 찾을 수 없습니다: " + paymentId));
+        
+        // 상태에 따라 처리
+        if (status == PaymentStatus.COMPLETED && transactionId != null) {
+            payment.complete(transactionId);
+        } else if (status == PaymentStatus.FAILED) {
+            payment.fail();
+        }
+        
+        return paymentRepository.save(payment);
     }
     
     @Override

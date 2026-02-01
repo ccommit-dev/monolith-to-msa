@@ -1,0 +1,367 @@
+' ==========================================
+' Ch06.07: Locust 부하 테스트 시퀀스
+' ==========================================
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.07: Locust 부하 테스트 시퀀스
+
+actor "Locust\nMaster" as Master
+participant "Locust\nWorker" as Worker
+participant "Spring Boot\nApplication" as App
+participant "ProductController" as ProductCtrl
+participant "OrderController" as OrderCtrl
+participant "PaymentController" as PaymentCtrl
+participant "H2 Database" as DB
+
+== 초기화 ==
+Master -> Worker: Locust 시작
+activate Worker
+Worker -> App: Health Check\nGET /actuator/health
+activate App
+App --> Worker: 200 OK
+deactivate App
+
+== Ramp-up 단계 (0 → 100명) ==
+note right of Master
+    Ramp-up: 점진적 부하 증가
+    Spawn rate: 10명/초
+    목표: 시스템 안정성 확인
+end note
+
+loop 사용자 수 증가 (0 → 100)
+    Master -> Worker: 사용자 생성 (10명/초)
+    activate Worker
+    
+    Worker -> ProductCtrl: GET /api/products/{productId}
+    activate ProductCtrl
+    ProductCtrl -> DB: SELECT product
+    activate DB
+    DB --> ProductCtrl: Product Entity
+    deactivate DB
+    ProductCtrl --> Worker: 200 OK
+    deactivate ProductCtrl
+    
+    Worker -> ProductCtrl: GET /api/products/{productId}/stock
+    activate ProductCtrl
+    ProductCtrl -> DB: SELECT stock
+    activate DB
+    DB --> ProductCtrl: Stock Value
+    deactivate DB
+    ProductCtrl --> Worker: 200 OK
+    deactivate ProductCtrl
+    
+    Worker -> OrderCtrl: POST /api/orders
+    activate OrderCtrl
+    OrderCtrl -> DB: SELECT FOR UPDATE\n(비관적 락)
+    activate DB
+    DB --> OrderCtrl: Product Entity
+    OrderCtrl -> DB: UPDATE stock\nINSERT order
+    DB --> OrderCtrl: Success
+    deactivate DB
+    OrderCtrl --> Worker: 201 Created
+    deactivate OrderCtrl
+    
+    Worker -> PaymentCtrl: POST /api/payments
+    activate PaymentCtrl
+    PaymentCtrl -> DB: INSERT payment
+    activate DB
+    DB --> PaymentCtrl: Payment Entity
+    deactivate DB
+    PaymentCtrl --> Worker: 201 Created
+    deactivate PaymentCtrl
+    
+    Worker --> Master: 메트릭 수집
+    deactivate Worker
+end
+
+== Steady 단계 (100명 유지, 5분) ==
+note right of Master
+    Steady: 일정한 부하 유지
+    목표: 성능 측정 및 한계점 파악
+    TPS: 2,000 이상
+    응답 시간: 500ms 이하
+    에러율: 1% 이하
+end note
+
+loop 5분간 지속
+    Master -> Worker: 부하 유지
+    activate Worker
+    
+        Worker -> ProductCtrl: 상품 조회
+        activate ProductCtrl
+        ProductCtrl -> DB: SELECT
+        activate DB
+        DB --> ProductCtrl: Product Entity
+        deactivate DB
+        ProductCtrl --> Worker: 200 OK
+        deactivate ProductCtrl
+    else
+        Worker -> OrderCtrl: 주문 생성
+        activate OrderCtrl
+        OrderCtrl -> DB: 트랜잭션 처리
+        activate DB
+        DB --> OrderCtrl: Success
+        deactivate DB
+        OrderCtrl --> Worker: 201 Created
+        deactivate OrderCtrl
+    else
+        Worker -> PaymentCtrl: 결제 처리
+        activate PaymentCtrl
+        PaymentCtrl -> DB: INSERT
+        activate DB
+        DB --> PaymentCtrl: Payment Entity
+        deactivate DB
+        PaymentCtrl --> Worker: 201 Created
+        deactivate PaymentCtrl
+
+loop 사용자 수 감소 (100 → 0)
+    Master -> Worker: 사용자 종료
+    activate Worker
+    Worker -> Worker: on_stop() 호출
+    Worker --> Master: 종료 완료
+    deactivate Worker
+end
+
+== 결과 리포트 ==
+Master -> Master: HTML 리포트 생성
+note right of Master
+    리포트 내용:
+    - 총 요청 수
+    - RPS (Requests Per Second)
+    - 평균/최소/최대 응답 시간
+    - 에러율
+    - 실패한 요청 목록
+end note
+
+@enduml
+
+' ==========================================
+' Locust 대시보드 모니터링
+' ==========================================
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Locust 대시보드 실시간 모니터링
+
+package "Locust 웹 UI (http://localhost:8089)" {
+    component "Statistics\n탭" as Stats {
+        - 요청별 통계
+        - RPS (Requests Per Second)
+        - 평균/최소/최대 응답 시간
+        - 에러율
+    }
+    
+    component "Charts\n탭" as Charts {
+        - 실시간 RPS 그래프
+        - 응답 시간 추이
+        - 사용자 수 변화
+    }
+    
+    component "Failures\n탭" as Failures {
+        - 실패한 요청 목록
+        - 에러 메시지
+        - 발생 시간
+    }
+    
+    component "Exceptions\n탭" as Exceptions {
+        - 예외 발생 내역
+        - 스택 트레이스
+    }
+}
+
+package "Spring Boot Application" {
+    component "API\n엔드포인트" as API
+    component "H2 Database" as DB
+}
+
+Stats --> API: 실시간 메트릭 수집
+Charts --> API: 그래프 데이터
+Failures --> API: 에러 정보
+Exceptions --> API: 예외 정보
+
+API --> DB: 데이터 조회/저장
+
+note right of Stats
+    베이스라인 검증:
+    - TPS ≥ 2,000
+    - 평균 응답 시간 ≤ 500ms
+    - 에러율 ≤ 1%
+end note
+
+@enduml
+
+' ==========================================
+' Ramp-up → Steady → Ramp-down 패턴
+' ==========================================
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ramp-up → Steady → Ramp-down 패턴
+
+participant "Locust\nMaster" as Master
+participant "시스템\n부하" as Load
+participant "응답\n시간" as Response
+participant "에러\n율" as Error
+
+== Ramp-up 단계 (0 → 100명, 10초) ==
+Master -> Load: 사용자 수 점진적 증가\n(10명/초)
+activate Load
+Load -> Response: 부하 증가 → 응답 시간 증가
+activate Response
+Response --> Master: 모니터링
+deactivate Response
+Load -> Error: 초기 에러 가능성
+activate Error
+Error --> Master: 에러율 확인
+deactivate Error
+note right of Master
+    목표: 시스템 안정성 확인
+    갑작스러운 부하 방지
+end note
+deactivate Load
+
+== Steady 단계 (100명 유지, 5분) ==
+Master -> Load: 일정한 부하 유지
+activate Load
+Load -> Response: 안정적인 응답 시간
+activate Response
+Response --> Master: 평균 응답 시간 측정
+note right of Master
+    목표: 성능 측정
+    - TPS: 2,000 이상
+    - 응답 시간: 500ms 이하
+end note
+deactivate Response
+Load -> Error: 낮은 에러율 유지
+activate Error
+Error --> Master: 에러율 ≤ 1%
+deactivate Error
+deactivate Load
+
+== Ramp-down 단계 (100 → 0명, 10초) ==
+Master -> Load: 사용자 수 점진적 감소
+activate Load
+Load -> Response: 응답 시간 정상화
+activate Response
+Response --> Master: 종료 확인
+deactivate Response
+Load -> Error: 에러 없음
+activate Error
+Error --> Master: 정상 종료
+deactivate Error
+note right of Master
+    목표: 정상 종료
+    리소스 정리
+    데이터 일관성 확인
+end note
+deactivate Load
+
+@enduml
+
+' ==========================================
+' Locust 핵심 메시지 4가지
+' ==========================================
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Locust 핵심 메시지 4가지
+
+package "1. Locust 기본 구조 이해" {
+    class HttpUser {
+        + wait_time: 요청 간 대기 시간
+        + tasks: 작업 세트 및 가중치
+        + on_start(): 초기화
+        + on_stop(): 정리
+    }
+    
+    class TaskSet {
+        + @task: 작업 가중치 설정
+        + on_start(): 시나리오 초기화
+        + catch_response: 커스텀 응답 처리
+    }
+    
+    class Scenario {
+        + ProductTaskSet: 상품 조회 (가중치: 5)
+        + OrderTaskSet: 주문 생성 (가중치: 3)
+        + PaymentTaskSet: 결제 처리 (가중치: 1)
+    }
+    
+    HttpUser --> TaskSet
+    TaskSet --> Scenario
+}
+
+package "2. Ramp-up → Steady → Ramp-down 패턴" {
+    class RampUp {
+        점진적 부하 증가
+        시스템 안정성 확인
+        갑작스러운 부하 방지
+    }
+    
+    class Steady {
+        일정한 부하 유지
+        성능 측정
+        한계점 파악
+    }
+    
+    class RampDown {
+        점진적 부하 감소
+        정상 종료
+        리소스 정리
+    }
+    
+    RampUp --> Steady
+    Steady --> RampDown
+}
+
+package "3. Locust 대시보드 활용" {
+    class Statistics {
+        요청별 상세 통계
+        RPS, 평균 응답 시간
+        에러율
+    }
+    
+    class Charts {
+        실시간 그래프
+        RPS 추이
+        응답 시간 추이
+    }
+    
+    class H2DB {
+        부하 테스트 중
+        DB 상태 실시간 확인
+        트랜잭션 처리량 검증
+    }
+    
+    Statistics --> Charts
+    Charts --> H2DB
+}
+
+package "4. 베이스라인 설정 및 검증" {
+    class TPS {
+        목표: 2,000 이상
+        RPS 측정
+        Statistics 탭 확인
+    }
+    
+    class ResponseTime {
+        목표: 500ms 이하
+        평균 응답 시간
+        Charts 탭 확인
+    }
+    
+    class ErrorRate {
+        목표: 1% 이하
+        Failures 탭 확인
+        예외 분석
+    }
+    
+    TPS --> ResponseTime
+    ResponseTime --> ErrorRate
+}
+
+@enduml
