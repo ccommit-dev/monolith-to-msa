@@ -1,0 +1,74 @@
+# Order Service 설정 (실습용 예제)
+# 실제 서비스 분리 시 별도 프로젝트의 application.yaml로 구성
+
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-binding-errors: always
+
+spring:
+  application:
+    name: order-service
+  
+  # Database 설정 (Order DB)
+  datasource:
+    url: jdbc:h2:mem:orderdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: sa
+    # 독립적인 커넥션 풀 (Order Service 전용)
+    hikari:
+      maximum-pool-size: 20  # 주문 서비스 전용 커넥션 풀
+      minimum-idle: 10
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
+  
+  # JPA 설정
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.H2Dialect
+    defer-datasource-initialization: true
+  
+  # SQL 초기화 설정
+  sql:
+    init:
+      mode: always
+      continue-on-error: false
+  
+  # H2 Console
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true
+        trace: false
+
+# Payment Service URL (환경 변수로 주입 가능)
+payment:
+  service:
+    url: ${PAYMENT_SERVICE_URL:http://localhost:8081}
+
+# Actuator 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+

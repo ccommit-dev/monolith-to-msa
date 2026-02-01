@@ -1,0 +1,401 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.09: 서비스 분리 - Before vs After
+
+left to right direction
+
+== Before: 모놀리식 아키텍처 ==
+
+component "상품 서비스" as ProductService
+component "주문 서비스" as OrderService
+component "결제 서비스" as PaymentService
+
+database "H2 Database\n(testdb)" as MonolithDB
+database "HikariCP\n커넥션 풀\n(max 10)" as Pool
+
+ProductService --> Pool
+OrderService --> Pool
+PaymentService --> Pool
+
+Pool --> MonolithDB
+
+note right of Pool
+    문제점:
+    - 모든 서비스가 하나의 커넥션 풀 공유
+    - 서비스 간 커넥션 경쟁
+    - 한 서비스의 부하가 전체에 영향
+    - 확장성 제약 (수직 확장만 가능)
+    - 장애 전파 가능
+end note
+
+== After: MSA 아키텍처 ==
+
+component "Order Service\nPort 8080" as OrderService
+component "Order API" as OrderAPI
+database "HikariCP\n커넥션 풀\n(max 20)" as OrderPool
+database "Order DB\n(orderdb)" as OrderDB
+
+component "Payment Service\nPort 8081" as PaymentService
+component "Payment API" as PaymentAPI
+database "HikariCP\n커넥션 풀\n(max 20)" as PaymentPool
+database "Payment DB\n(paymentdb)" as PaymentDB
+
+OrderService --> OrderAPI
+OrderAPI --> OrderPool
+OrderPool --> OrderDB
+
+PaymentService --> PaymentAPI
+PaymentAPI --> PaymentPool
+PaymentPool --> PaymentDB
+
+OrderAPI ..> PaymentAPI : REST API 호출
+
+note right of OrderPool
+    장점:
+    - 서비스별 독립적인 커넥션 풀
+    - 서비스 간 커넥션 경쟁 없음
+    - 독립적인 스케일링 가능
+    - 장애 격리 가능
+    - 서비스별 최적화 가능
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.09: 주문 생성 → 결제 처리 시퀀스 다이어그램
+
+actor Client
+participant "Order Service\n(Port 8080)" as OrderService
+database "Order DB\n(orderdb)" as OrderDB
+participant "Payment Service\n(Port 8081)" as PaymentService
+database "Payment DB\n(paymentdb)" as PaymentDB
+
+Client -> OrderService: POST /api/orders\n(OrderCreateRequest)
+activate OrderService
+
+OrderService -> OrderService: 상품 조회\n(Product Service 호출 필요)
+note right of OrderService
+    향후 Product Service
+    분리 시 API 호출
+end note
+
+OrderService -> OrderDB: 주문 데이터 저장
+activate OrderDB
+OrderDB --> OrderService: Order Entity
+deactivate OrderDB
+
+OrderService -> PaymentService: POST /api/payments\n(PaymentCreateRequest)\nREST API 호출
+activate PaymentService
+
+note right of PaymentService
+    서비스 간 통신:
+    - HTTP REST API
+    - 동기 통신
+    - 타임아웃 설정 필요
+end note
+
+PaymentService -> PaymentDB: 결제 데이터 저장\n(PENDING 상태)
+activate PaymentDB
+PaymentDB --> PaymentService: Payment Entity
+deactivate PaymentDB
+
+PaymentService -> PaymentService: PG사 결제 요청
+note right of PaymentService
+    결제 처리:
+    - PG사 API 호출
+    - 재시도 로직
+    - 실패 시 보상 트랜잭션
+end note
+
+PaymentService -> PaymentDB: 결제 상태 업데이트\n(COMPLETED/FAILED)
+activate PaymentDB
+PaymentDB --> PaymentService: Payment Entity
+deactivate PaymentDB
+
+PaymentService --> OrderService: PaymentResponse\n(결제 결과)
+deactivate PaymentService
+
+alt 결제 성공
+    OrderService -> OrderDB: 주문 상태 업데이트\n(CONFIRMED)
+    activate OrderDB
+    OrderDB --> OrderService: Order Entity
+    deactivate OrderDB
+    
+    OrderService --> Client: 201 Created\n(OrderResponse)
+    note right of OrderService
+        성공 시나리오:
+        - 주문 생성 완료
+        - 결제 완료
+        - 전체 트랜잭션 성공
+    end note
+else 결제 실패
+    OrderService -> OrderDB: 주문 상태 업데이트\n(CANCELLED)
+    activate OrderDB
+    OrderDB --> OrderService: Order Entity
+    deactivate OrderDB
+    
+    OrderService --> Client: 400 Bad Request\n(결제 실패)
+    note right of OrderService
+        실패 시나리오:
+        - 주문은 생성됨
+        - 결제 실패
+        - 보상 트랜잭션 필요
+        (Saga 패턴 고려)
+    end note
+end
+
+deactivate OrderService
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.09: 데이터베이스 분리 (Database per Service)
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 10
+
+== 모놀리식: 단일 데이터베이스 ==
+
+class products <<table>> {
+    id : BIGINT
+    product_id : VARCHAR
+    name : VARCHAR
+    price : BIGINT
+    stock : INT
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+class orders <<table>> {
+    id : BIGINT
+    customer_id : VARCHAR
+    product_id : VARCHAR
+    quantity : INT
+    total_price : BIGINT
+    status : VARCHAR
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+class payments <<table>> {
+    id : BIGINT
+    order_id : BIGINT
+    amount : BIGINT
+    method : VARCHAR
+    status : VARCHAR
+    transaction_id : VARCHAR
+    paid_at : TIMESTAMP
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+orders }o--|| payments : FK
+
+note right of products
+    문제점:
+    - 모든 서비스가 하나의 DB 공유
+    - 스키마 변경 시 전체 영향
+    - 데이터 격리 불가능
+    - 성능 최적화 제약
+end note
+
+== MSA: Database per Service ==
+
+class orders_msa <<table>> {
+    id : BIGINT
+    customer_id : VARCHAR
+    product_id : VARCHAR
+    quantity : INT
+    total_price : BIGINT
+    status : VARCHAR
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+class payments_msa <<table>> {
+    id : BIGINT
+    order_id : BIGINT
+    amount : BIGINT
+    method : VARCHAR
+    status : VARCHAR
+    transaction_id : VARCHAR
+    paid_at : TIMESTAMP
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+payments_msa ..> orders_msa : 참조 (Order ID)\n외래키 없음
+
+note right of orders_msa
+    장점:
+    - 서비스별 독립적인 DB
+    - 스키마 변경 독립성
+    - 데이터 격리
+    - 성능 최적화 가능
+    - 서비스별 다른 DB 선택 가능
+end note
+
+note bottom
+    주의사항:
+    - 외래키 제약 없음 (분산 환경)
+    - 데이터 일관성 관리 필요
+    - 분산 트랜잭션 복잡도 증가
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.09: 독립 배포 및 확장
+
+left to right direction
+
+== Docker 컨테이너 구성 ==
+
+component "Order Container 1\n(Port 8080)" as Order1
+component "Order Container 2\n(Port 8080)" as Order2
+component "Order Container 3\n(Port 8080)" as Order3
+
+component "Payment Container 1\n(Port 8081)" as Payment1
+
+cloud "Load Balancer" as LB
+
+database "Order DB\n(orderdb)" as OrderDB
+database "Payment DB\n(paymentdb)" as PaymentDB
+
+LB --> Order1
+LB --> Order2
+LB --> Order3
+
+Order1 --> OrderDB
+Order2 --> OrderDB
+Order3 --> OrderDB
+
+Order1 ..> Payment1 : REST API
+Order2 ..> Payment1 : REST API
+Order3 ..> Payment1 : REST API
+
+Payment1 --> PaymentDB
+
+note right of Order1
+    독립 확장:
+    - 주문 서비스: 3개 인스턴스
+    - 결제 서비스: 1개 인스턴스
+    - 서비스별 독립적 스케일링
+end note
+
+note right of Payment1
+    리소스 효율성:
+    - 트래픽이 많은 서비스만 확장
+    - 비용 최적화
+    - 성능 최적화
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.09: 서비스 분리 핵심 메시지
+
+left to right direction
+
+== 1. 서비스 분리의 필요성 ==
+
+component "커넥션 풀 경쟁" as CP
+component "장애 전파" as Failure
+component "확장성 제약" as Scale
+
+component "독립적 확장" as Independent
+component "장애 격리" as Isolation
+component "서비스별 최적화" as Optimize
+
+CP --> Independent
+Failure --> Isolation
+Scale --> Optimize
+
+note right
+    비즈니스 가치:
+    - 빠른 배포
+    - 팀 독립성
+    - 기술 다양성
+end note
+
+== 2. 데이터베이스 분리 ==
+
+database "Order DB" as OrderDB
+database "Payment DB" as PaymentDB
+
+component "데이터 격리" as DataIsolation
+component "독립적 스키마 변경" as SchemaChange
+component "성능 최적화" as Performance
+component "서비스별 DB 선택" as DBChoice
+
+OrderDB --> DataIsolation
+PaymentDB --> SchemaChange
+OrderDB --> Performance
+PaymentDB --> DBChoice
+
+note right
+    도전:
+    - 분산 트랜잭션
+    - 데이터 일관성 관리
+    - Saga 패턴 필요
+end note
+
+== 3. 서비스 간 통신 ==
+
+component "동기 통신" as Sync
+component "HTTP 기반" as HTTP
+component "표준 프로토콜" as Standard
+
+component [간단한 구현] as SimpleImpl
+component [쉬운 디버깅] as EasyDebug
+component [범용성] as Universal
+
+Sync --> SimpleImpl
+HTTP --> EasyDebug
+Standard --> Universal
+
+note right
+    고려사항:
+    - 네트워크 지연
+    - 장애 전파
+    - 타임아웃 처리
+    - Circuit Breaker 필요
+end note
+
+== 4. 독립 배포 ==
+
+component "Docker" as Docker
+component "독립 확장" as Scale
+component "빠른 배포" as Deploy
+
+component [표준화된 배포] as StandardDeploy
+component [리소스 효율성] as ResourceEfficiency
+component [롤백 용이성] as EasyRollback
+
+Docker --> StandardDeploy
+Scale --> ResourceEfficiency
+Deploy --> EasyRollback
+
+note right
+    장점:
+    - 서비스별 인스턴스 수 조정
+    - 빠른 배포 및 롤백
+    - 리소스 효율성
+end note
+
+@enduml
+

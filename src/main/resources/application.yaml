@@ -81,6 +81,12 @@ management:
     tags:
       application: ${spring.application.name}
 
+# Payment Service URL (MSA 환경에서 사용)
+# 환경 변수 PAYMENT_SERVICE_URL로 오버라이드 가능
+payment:
+  service:
+    url: ${PAYMENT_SERVICE_URL:http://localhost:8081}
+
 # Server 설정
 server:
   port: 8080

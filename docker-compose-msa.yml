@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Order Service
+  order-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.order
+    container_name: order-service
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:h2:mem:orderdb
+      - PAYMENT_SERVICE_URL=http://payment-service:8081
+    networks:
+      - msa-network
+    depends_on:
+      - payment-service
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    # 독립 확장 예시 (주석 해제하여 사용)
+    # scale: 3
+
+  # Payment Service
+  payment-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.payment
+    container_name: payment-service
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:h2:mem:paymentdb
+    networks:
+      - msa-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+networks:
+  msa-network:
+    driver: bridge
+
+# 사용법 (Docker Compose v2):
+# 1. 기본 실행: docker compose -f docker-compose-msa.yml up -d
+# 2. 주문 서비스만 확장: docker compose -f docker-compose-msa.yml up -d --scale order-service=3
+# 3. 로그 확인: docker compose -f docker-compose-msa.yml logs -f order-service
+# 4. 중지: docker compose -f docker-compose-msa.yml down
+

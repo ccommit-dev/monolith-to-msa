@@ -1,0 +1,37 @@
+# Payment Service Dockerfile
+# 실습용 예제 - 실제 서비스 분리 시 별도 프로젝트로 구성
+
+# Build stage
+FROM gradle:8.5-jdk17 AS build
+WORKDIR /app
+
+# Gradle 캐시 최적화를 위해 의존성 먼저 복사
+COPY build.gradle settings.gradle ./
+COPY gradle ./gradle
+COPY gradlew ./
+
+# Gradle Wrapper 실행 권한 부여
+RUN chmod +x gradlew
+
+# Gradle 의존성 다운로드 (캐시 활용)
+RUN ./gradlew dependencies --no-daemon || true
+
+# 소스 코드 복사 및 빌드
+COPY src ./src
+RUN ./gradlew clean build -x test --no-daemon --stacktrace \
+    -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m"
+
+# Run stage
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY --from=build /app/build/libs/*-SNAPSHOT.jar app.jar
+
+# Payment Service Port
+EXPOSE 8081
+
+# 환경 변수 설정
+ENV SPRING_PROFILES_ACTIVE=docker
+ENV SPRING_DATASOURCE_URL=jdbc:h2:mem:paymentdb
+
+ENTRYPOINT ["java", "-jar", "app.jar"]
+
