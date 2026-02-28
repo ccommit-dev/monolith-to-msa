@@ -488,12 +488,3 @@ git checkout issue1  # 또는 issue2, issue3 등
 - [ ] Ch06.08: 병목 재현
 - [ ] Ch06.09: 서비스 분리
 
----
-
-## 📧 문의 및 피드백
-
-실습 중 문제가 발생하거나 질문이 있으시면 GitHub Issues를 통해 문의해주세요.
-
----
-
-**Happy Learning! 🚀**
