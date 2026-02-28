@@ -1,229 +1,499 @@
-# monolith-to-msa
-패스트캠퍼스 대용량 트래픽 msa 아키텍처 실습
+# Monolith to MSA 실습 가이드 전체 목차
 
-# 🚀 Backend Performance & AI Operations Project
+## 📚 실습 개요
 
-이 프로젝트는 **Spring Boot 기반 백엔드 시스템을 설계 → 성능 최적화 → AI 기반 운영 자동화**까지  
-실무 흐름 그대로 학습할 수 있도록 구성된 **실전 중심 커리큘럼**입니다.
+이 실습은 모놀리식 아키텍처에서 마이크로서비스 아키텍처(MSA)로 전환하는 과정을 단계별로 학습하는 프로그램입니다.
 
-- 모놀리식 → MSA 전환
-- 캐시 / 비동기 / 회복탄력성 설계
-- 부하 테스트 및 병목 분석
-- AI 기반 트래픽 분석, 이상 탐지, 자동 대응, RCA
-
----
-
-## 📦 Ch06. Backend Architecture & Performance
-
-### Ch06.01 프로젝트 설정 (40분)
-- Spring Boot 프로젝트 생성
-- 필수 의존성 설정 (`build.gradle`)
-- `application.yml` 환경 설정
-- Docker 환경 구성
-- Health Check 설정
-- 프로젝트 구조 설계
-- ✅ 실습 체크리스트
+### 학습 목표
+- Spring Boot를 활용한 모놀리식 애플리케이션 개발
+- 레이어드 아키텍처 및 도메인 모델링 이해
+- 트랜잭션 관리 및 동시성 제어 학습
+- Redis 캐시를 통한 성능 최적화
+- Locust를 이용한 부하 테스트 및 병목 분석
+- MSA로의 서비스 분리 및 독립 배포
 
 ---
 
-### Ch06.02 모놀리식 설계 (50분)
-- 레이어드 아키텍처 (Layered Architecture)
-- 컴포넌트 설계  
-  `Controller → Service → Repository`
-- 모듈 의존성 설계 (단방향, DIP)
-- 패키지 구조 (Domain 중심)
-- 실전 예시: Order 도메인 (시퀀스 다이어그램)
-- 💡 핵심 메시지 (4가지)
+## 🚀 프로젝트 생성 방법
+
+실습을 시작하기 전에 Spring Initializr를 사용하여 프로젝트를 생성하고 IntelliJ에서 여는 방법을 안내합니다.
+
+### 방법 1: Spring Initializr 웹사이트 사용 (권장)
+
+#### 1단계: Spring Initializr 접속
+
+**웹사이트:** [https://start.spring.io/](https://start.spring.io/)
+
+#### 2단계: 프로젝트 설정
+
+**Project 설정:**
+- **Project**: `Gradle - Groovy`
+- **Language**: `Java`
+- **Spring Boot**: `3.2.1` (안정 버전)
+
+**Project Metadata:**
+- **Group**: `com.ccommit`
+- **Artifact**: `monolith-to-msa`
+- **Name**: `monolith-to-msa`
+- **Description**: `Monolith to MSA Migration Project`
+- **Package name**: `com.ccommit.monolith_to_msa`
+- **Packaging**: `Jar`
+- **Java**: `17`
+
+#### 3단계: 의존성 추가
+
+**ADD DEPENDENCIES 클릭 후 다음 의존성 검색 및 추가:**
+
+```
+Spring Web
+Spring Data JPA
+H2 Database
+Lombok
+Spring Boot Actuator
+Validation
+```
+
+**상세 설명:**
+- `Spring Web`: REST API 개발
+- `Spring Data JPA`: 데이터베이스 접근
+- `H2 Database`: 인메모리 데이터베이스
+- `Lombok`: 보일러플레이트 코드 제거
+- `Spring Boot Actuator`: Health Check 및 메트릭
+- `Validation`: 입력값 검증
+
+#### 4단계: 프로젝트 다운로드
+
+**GENERATE 버튼 클릭**
+- `monolith-to-msa.zip` 파일 다운로드
+- 원하는 위치에 압축 해제
+
+```bash
+# 압축 해제
+unzip monolith-to-msa.zip
+cd monolith-to-msa
+```
 
 ---
 
-### Ch06.03 도메인 모델링 (50분)
-- `Order` 엔티티 설계 (`@Entity`, 필드, 메서드)
-- `Payment` 엔티티 설계 및 관계 설정
-- ERD 작성 (Entity Relationship Diagram)
-- DDL 스크립트 작성 (CREATE TABLE, 제약조건)
-- 연관관계 설정  
-  `@OneToMany`, `@ManyToOne`
-- 영속성 컨텍스트  
-  (1차 캐시, 변경 감지, 쓰기 지연)
-- 💡 핵심 메시지 (4가지)
+### 방법 2: IntelliJ IDEA에서 직접 생성
+
+#### 1단계: IntelliJ 실행
+
+**New Project 클릭**
+
+#### 2단계: Spring Initializr 선택
+
+- 좌측 메뉴에서 `Spring Initializr` 선택
+- **Server URL**: `https://start.spring.io` (기본값)
+- **Next 클릭**
+
+#### 3단계: 프로젝트 설정
+
+**Project SDK:** `17` 선택
+
+**Project Metadata:**
+- **Name**: `monolith-to-msa`
+- **Group**: `com.ccommit`
+- **Artifact**: `monolith-to-msa`
+- **Type**: `Gradle - Groovy`
+- **Language**: `Java`
+- **Packaging**: `Jar`
+- **Java Version**: `17`
+- **Version**: `0.0.1-SNAPSHOT`
+
+**Next 클릭**
+
+#### 4단계: 의존성 선택
+
+**Developer Tools:**
+- ✅ Lombok
+- ✅ Spring Boot Actuator
+
+**Web:**
+- ✅ Spring Web
+
+**SQL:**
+- ✅ Spring Data JPA
+- ✅ H2 Database
+
+**I/O:**
+- ✅ Validation
+
+**Create 클릭**
 
 ---
 
-### Ch06.04 주문 API (50분)
-- `POST /api/orders` 구현 (Controller, DTO)
-- `@Transactional` 트랜잭션 관리 (ACID)
-- 재고 차감 + 주문 생성 로직 (시퀀스 다이어그램)
-- `OrderService` 비즈니스 로직 구현
-- 예외 처리  
-  (Custom Exception, `@RestControllerAdvice`)
-- 단위 테스트 (Given-When-Then)
-- 💡 핵심 메시지 (4가지)
+### 방법 3: 기존 프로젝트를 IntelliJ로 열기
+
+#### 1단계: IntelliJ IDEA 실행
+
+**Open 또는 Import 클릭**
+
+#### 2단계: 프로젝트 선택
+
+- Spring Initializr에서 다운로드하거나 GitHub에서 클론한 `monolith-to-msa` 폴더 선택
+- **Open as Project 선택**
+
+#### 3단계: Gradle 자동 Import
+
+- IntelliJ가 자동으로 `build.gradle` 인식
+- 우측 하단에 "Load Gradle Project" 알림 표시
+- **Load 클릭**
+- 의존성 다운로드 대기 (1~3분)
+
+#### 4단계: JDK 설정 확인
+
+**File → Project Structure (⌘;)**
+- **Project SDK**: `17` 확인
+- **Language Level**: `17 - Sealed types, always-strict floating-point semantics` 확인
+
+#### 5단계: Gradle 설정 확인
+
+**IntelliJ IDEA → Settings (⌘,)**
+- **Build, Execution, Deployment → Build Tools → Gradle**
+- **Gradle JVM**: `Project SDK (17)` 선택
 
 ---
 
-### Ch06.05 결제 로직 (50분)
-- 결제 프로세스 (시퀀스 다이어그램)
-- 상태 관리  
-  `PENDING → COMPLETED / FAILED`
-- `PaymentService` 구현 (`@Transactional`, PG 호출)
-- 에러 처리 및 재시도  
-  (Timeout, `@Retryable`, Circuit Breaker)
-- 통합 테스트  
-  (`@SpringBootTest`, `MockMvc`)
-- 💡 핵심 메시지 (4가지)
+### 프로젝트 실행 확인
+
+#### 터미널에서 실행
+
+```bash
+# 프로젝트 디렉토리로 이동
+cd monolith-to-msa
+
+# Gradle Wrapper 권한 부여 (Mac/Linux)
+chmod +x gradlew
+
+# 빌드 테스트
+./gradlew clean build
+
+# 애플리케이션 실행
+./gradlew bootRun
+```
+
+#### IntelliJ에서 실행
+
+**방법 1: Run 버튼 사용**
+1. `MonolithToMsaApplication.java` 파일 열기
+2. `main()` 메서드 왼쪽의 ▶️ 버튼 클릭
+3. `Run 'MonolithToMsaApplication.main()'` 선택
+
+**방법 2: Gradle Task 사용**
+1. 우측 Gradle 탭 클릭
+2. `Tasks → application → bootRun` 더블클릭
+
+**실행 성공 확인:**
+```
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+ :: Spring Boot ::                (v3.2.1)
+
+Started MonolithToMsaApplication in 3.5 seconds
+```
+
+**브라우저에서 확인:**
+```
+http://localhost:8080
+```
 
 ---
 
-### Ch06.06 Redis 캐시 (50분)
-- Cache Aside 패턴 (시퀀스 다이어그램)
-- `@Cacheable` 구현 (설정, 사용법)
-- TTL 전략 (60초 ~ 3600초)
-- 성능 비교  
-  - Before: 200ms  
-  - After: 10ms (20배 향상)
-- 실전 예시  
-  (상품 조회, 재고 조회 캐싱)
-- 💡 핵심 메시지 (4가지)
+### 문제 해결
+
+#### 1. JDK 17이 설치되어 있지 않은 경우
+
+**Mac (Homebrew):**
+```bash
+brew install openjdk@17
+```
+
+**Windows:**
+- [Oracle JDK 17 다운로드](https://www.oracle.com/java/technologies/javase/jdk17-archive-downloads.html)
+- 또는 [OpenJDK 17 다운로드](https://adoptium.net/)
+
+**설치 확인:**
+```bash
+java -version
+# 출력: openjdk version "17.0.x"
+```
+
+#### 2. Gradle 빌드 실패
+
+```bash
+# Gradle Wrapper 재생성
+gradle wrapper
+
+# 캐시 정리
+./gradlew clean --refresh-dependencies
+```
+
+#### 3. IntelliJ에서 의존성 인식 안 됨
+
+**File → Invalidate Caches / Restart**
+- **Invalidate and Restart 클릭**
+
+#### 4. 포트 8080이 이미 사용 중
+
+**application.yaml에서 포트 변경:**
+```yaml
+server:
+  port: 8081
+```
 
 ---
 
-### Ch06.07 부하 테스트 (50분)
-- k6 기본 스크립트  
-  (설치, 구조, 실행)
-- 시나리오 작성  
-  (Ramp-up → Steady → Ramp-down)
-- Grafana 대시보드  
-  (InfluxDB 연동, 실시간 시각화)
-- 베이스라인 설정  
-  - TPS: 2,000  
-  - 응답 시간: 500ms  
-  - 에러율: 1%
-- 💡 핵심 메시지 (4가지)
+### ✅ 프로젝트 생성 체크리스트
+
+- [ ] Spring Initializr에서 프로젝트 생성 또는 IntelliJ에서 직접 생성
+- [ ] 프로젝트를 IntelliJ로 열기
+- [ ] Gradle 의존성 자동 다운로드 완료
+- [ ] JDK 17 설정 확인
+- [ ] `./gradlew clean build` 성공
+- [ ] `./gradlew bootRun` 실행 성공
+- [ ] `http://localhost:8080` 접속 확인
 
 ---
 
-### Ch06.08 병목 재현 (40분)
-- 병목 현상 재현  
-  - VU 100: 정상  
-  - VU 200: 병목 발생
-- 커넥션 풀 고갈  
-  (`HikariCP max-pool-size = 10`)
-- 분석 리포트  
-  (병목 지점, 근본 원인, 해결 방안)
-- 💡 핵심 메시지
-  - VU 200 병목
-  - 커넥션 풀 고갈
-  - 모놀리식 한계
-  - MSA 필요성
+## 🗂️ 실습 단계별 목차
+
+### Ch06.01: 프로젝트 설정 (Issue1)
+- **목표**: Spring Boot 프로젝트 기본 환경 구성
+- **소요 시간**: 약 30분
+- **주요 내용**:
+  - Gradle 프로젝트 설정
+  - Spring Boot 의존성 구성
+  - H2 Database 설정
+  - Health Check 구현
+  - Docker 환경 구성
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE1.md](./PRACTICE_GUIDE_ISSUE1.md)
 
 ---
 
-### Ch06.09 서비스 분리 (40분)
-- 서비스 분리 전략  
-  (Monolith → Order + Payment)
-- Order Service  
-  - Port: 8080  
-  - DB: orderdb
-- Payment Service  
-  - Port: 8081  
-  - DB: paymentdb
-- API 통신 구조 (REST, 시퀀스 다이어그램)
-- Docker 기반 독립 배포 및 확장
-- 💡 핵심 메시지 (4가지)
+### Ch06.02: 모놀리식 설계 (Issue2)
+- **목표**: 레이어드 아키텍처 기반 모놀리식 애플리케이션 구현
+- **소요 시간**: 약 60분
+- **주요 내용**:
+  - Domain Layer (Entity, Enum)
+  - Repository Layer (JPA Repository)
+  - Service Layer (비즈니스 로직)
+  - Controller Layer (REST API)
+  - DTO 설계
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE2.md](./PRACTICE_GUIDE_ISSUE2.md)
 
 ---
 
-### Ch06.10 통신 구조 (40분)
-- WebClient 전환  
-  (`RestTemplate → WebClient`)
-- Non-blocking I/O
-- Resilience4j  
-  (Circuit Breaker, Retry, Timeout)
-- Fallback 처리  
-  (Payment 실패 시 보류)
-- 💡 핵심 메시지 (4가지)
+### Ch06.03: 도메인 모델링 (Issue3)
+- **목표**: JPA 엔티티 관계 설정 및 영속성 컨텍스트 이해
+- **소요 시간**: 약 50분
+- **주요 내용**:
+  - Order-Payment 관계 설정 (@OneToMany, @ManyToOne)
+  - ERD 설계
+  - DDL 스크립트
+  - 영속성 컨텍스트 (1차 캐시, 변경 감지, 쓰기 지연)
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE3.md](./PRACTICE_GUIDE_ISSUE3.md)
 
 ---
 
-### Ch06.11 비동기 처리 (40분)
-- Redis Pub/Sub 구조  
-  (Publish → Subscribe)
-- 이벤트 기반 아키텍처  
-  (`OrderCreated → PaymentCompleted`)
-- DLQ (Dead Letter Queue)
-- 💡 핵심 메시지 (4가지)
+### Ch06.04: 주문 API (Issue4)
+- **목표**: 재고 차감 + 주문 생성 로직 및 트랜잭션 관리
+- **소요 시간**: 약 60분
+- **주요 내용**:
+  - Product 엔티티 및 재고 관리
+  - 비관적 락 (Pessimistic Lock)
+  - 트랜잭션 관리 (@Transactional)
+  - Custom Exception 및 GlobalExceptionHandler
+  - 단위 테스트 (Mockito)
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE4.md](./PRACTICE_GUIDE_ISSUE4.md)
 
 ---
 
-### Ch06.12 성능 비교 (30분)
-- Before vs After 성능 비교  
-  - TPS ×4  
-  - 응답 시간 90% 감소
-- 주요 개선 사항  
-  (독립 DB, 비동기, 캐싱, Circuit Breaker)
-- Ch06 전체 흐름 정리
-- 💡 핵심 메시지  
-  - 측정 → 분석 → 개선 → 검증
+### Ch06.05: 결제 로직 (Issue5)
+- **목표**: 결제 상태 관리 및 재시도 로직 구현
+- **소요 시간**: 약 60분
+- **주요 내용**:
+  - Payment 상태 관리 (State Machine)
+  - PaymentGatewayService (Mock)
+  - 재시도 로직 (@Retryable, @Backoff)
+  - 통합 테스트 (@SpringBootTest)
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE5.md](./PRACTICE_GUIDE_ISSUE5.md)
 
 ---
 
-## 🤖 Ch07. AI-Based Operations
+### Ch06.06: Redis 캐시 (Issue6)
+- **목표**: Cache Aside 패턴 및 성능 최적화
+- **소요 시간**: 약 50분
+- **주요 내용**:
+  - Redis 설정
+  - @Cacheable 구현
+  - TTL 전략 (상품: 60초, 재고: 300초)
+  - 성능 비교 (Before: 200ms → After: 10ms)
 
-### Ch07.01 AI 트래픽 데이터 수집 (50분)
-- 핵심 메트릭  
-  (TPS, Latency, Error Rate, Resource)
-- 데이터 파이프라인  
-  (수집 → 저장 → 처리 → 시각화)
-- AI 이상 탐지  
-  (정상 패턴 학습 → 이상치 감지)
-- 인사이트 대시보드  
-  (Grafana + AI 통찰)
-- 💡 핵심 메시지 (4가지)
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE6.md](./PRACTICE_GUIDE_ISSUE6.md)
 
 ---
 
-### Ch07.02 AI 이상징후 탐지 (50분)
-- Baseline Learning  
-  (정상 패턴 7일 학습 → 기준선)
-- AI 자동 감지  
-  (실시간 모니터링 → 알림)
-- Part 2/3 병목 자동 감지  
-  (커넥션 풀 고갈 탐지)
-- False Positive 최소화  
-  (30% → 5%)
-- 💡 핵심 메시지 (4가지)
+### Ch06.07: Locust 부하 테스트 (Issue7)
+- **목표**: 부하 테스트 및 실시간 모니터링
+- **소요 시간**: 약 50분
+- **주요 내용**:
+  - Locust 설치 및 설정
+  - 시나리오 작성 (상품 조회, 주문 생성, 결제 처리)
+  - Ramp-up → Steady → Ramp-down 패턴
+  - 베이스라인 설정 (TPS 2,000, 응답 500ms)
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE7.md](./PRACTICE_GUIDE_ISSUE7.md)
 
 ---
 
-### Ch07.03 AI 자동알림 대응 (50분)
-- Alert Fatigue 해결  
-  (스마트 알림, 100건 → 5건)
-- 자동 Incident 생성
-- Auto-remediation  
-  (CPU / Memory / DB Connection)
-- PagerDuty / Opsgenie 연동
-- 💡 핵심 메시지 (4가지)
+### Ch06.08: 병목 재현 (Issue8)
+- **목표**: 커넥션 풀 고갈 및 모놀리식 한계 분석
+- **소요 시간**: 약 40분
+- **주요 내용**:
+  - VU 100 vs VU 200 성능 비교
+  - HikariCP 커넥션 풀 고갈 재현
+  - 병목 지점 분석
+  - MSA 전환 필요성 인식
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE8.md](./PRACTICE_GUIDE_ISSUE8.md)
 
 ---
 
-### Ch07.04 AI 근본원인 분석 (50분)
-- Part 6 장애 AI 자동 진단  
-  (로그 → 메트릭 → 근본 원인)
-- AI 추천 vs 엔지니어 판단  
-  (협업 모델)
-- 아키텍처 전환 효과 분석  
-  (Before / After 자동 측정)
-- AI 시대의 엔지니어 역할  
-  (AI Supervisor, Problem Solver)
-- 💡 핵심 메시지 (4가지)
+### Ch06.09: 서비스 분리 (Issue9)
+- **목표**: Order Service와 Payment Service 분리
+- **소요 시간**: 약 90분
+- **주요 내용**:
+  - 서비스 분리 전략
+  - Database per Service 패턴
+  - REST API 통신 구현
+  - Docker Compose 기반 독립 배포
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE9.md](./PRACTICE_GUIDE_ISSUE9.md)
 
 ---
 
-## 🎯 Goal
+## 📋 실습 전 준비사항
 
-> **측정 가능한 성능 개선과  
-> 설명 가능한 AI 운영 시스템을 설계하는 것**
+### 필수 환경
+- **JDK**: 17 이상
+- **Gradle**: 8.5 이상
+- **IDE**: IntelliJ IDEA 또는 VS Code
+- **Docker**: Docker Desktop (최신 버전)
+- **Python**: 3.8 이상 (Locust 부하 테스트용)
+- **Git**: 최신 버전
 
-이 프로젝트는 단순 구현이 아니라  
-**실무에서 바로 적용 가능한 사고방식과 구조**를 목표로 합니다.
+### 선택 환경
+- **Redis**: Docker 또는 로컬 설치
+- **Postman**: API 테스트용
+- **H2 Console**: 브라우저 기반 DB 접속
+
+---
+
+## 🎯 실습 진행 방법
+
+### 1단계: 코드 클론
+```bash
+# 저장소 클론
+git clone https://github.com/ccommit-dev/monolith-to-msa.git
+cd monolith-to-msa
+
+# 원하는 브랜치로 체크아웃
+git checkout issue1  # 또는 issue2, issue3 등
+```
+
+### 2단계: 단계별 실습
+각 issue별로 브랜치를 체크아웃하여 실습을 진행합니다:
+- `issue1`: 프로젝트 설정
+- `issue2`: 모놀리식 설계
+- `issue3`: 도메인 모델링
+- ... (issue9까지)
+
+### 3단계: 빌드 및 실행
+```bash
+# 빌드
+./gradlew clean build
+
+# 실행
+./gradlew bootRun
+```
+
+### 4단계: 테스트
+```bash
+# 단위 테스트
+./gradlew test
+
+# 특정 테스트만 실행
+./gradlew test --tests OrderServiceTest
+```
+
+---
+
+## 💡 학습 팁
+
+### 코드 작성 순서
+각 단계별로 다음 순서로 코드를 작성하는 것을 권장합니다:
+1. **Domain Layer**: Entity, Enum
+2. **Repository Layer**: JPA Repository 인터페이스
+3. **Service Layer**: Service 인터페이스 → 구현체
+4. **DTO Layer**: Request, Response DTO
+5. **Controller Layer**: REST API Controller
+6. **Exception Layer**: Custom Exception, GlobalExceptionHandler
+7. **Test Layer**: 단위 테스트, 통합 테스트
+
+### 디버깅 팁
+- **로그 활성화**: `application.yaml`에서 SQL 로그 확인
+- **H2 Console**: 브라우저에서 DB 상태 실시간 확인
+- **Actuator**: Health Check 및 메트릭 모니터링
+- **단위 테스트**: 각 계층별로 독립적으로 테스트
+
+### 문제 해결
+각 issue별 가이드 문서의 "문제 해결" 섹션을 참고하세요.
+
+---
+
+## 📖 참고 자료
+
+### 공식 문서
+- [Spring Boot 공식 문서](https://docs.spring.io/spring-boot/docs/current/reference/html/)
+- [Spring Data JPA 공식 문서](https://docs.spring.io/spring-data/jpa/docs/current/reference/html/)
+- [Locust 공식 문서](https://docs.locust.io/)
+- [Docker 공식 문서](https://docs.docker.com/)
+
+### GitHub 저장소
+- [monolith-to-msa 저장소](https://github.com/ccommit-dev/monolith-to-msa)
+
+---
+
+## 🔍 실습 체크리스트
+
+전체 실습 완료 여부를 확인하세요:
+
+- [ ] Ch06.01: 프로젝트 설정
+- [ ] Ch06.02: 모놀리식 설계
+- [ ] Ch06.03: 도메인 모델링
+- [ ] Ch06.04: 주문 API
+- [ ] Ch06.05: 결제 로직
+- [ ] Ch06.06: Redis 캐시
+- [ ] Ch06.07: Locust 부하 테스트
+- [ ] Ch06.08: 병목 재현
+- [ ] Ch06.09: 서비스 분리
+
+---
+
+## 📧 문의 및 피드백
+
+실습 중 문제가 발생하거나 질문이 있으시면 GitHub Issues를 통해 문의해주세요.
+
+---
+
+**Happy Learning! 🚀**
