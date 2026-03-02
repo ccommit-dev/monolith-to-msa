@@ -1,0 +1,372 @@
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title Ch06.05: 결제 프로세스 시퀀스 다이어그램
+
+actor Client
+participant "PaymentController" as Controller
+participant "PaymentService" as Service
+participant "PaymentRepository" as PaymentRepo
+database "Payment\n(PENDING)" as Payment
+participant "PaymentGatewayService" as PG
+database "PG사\n(외부)" as ExternalPG
+
+Client -> Controller: POST /api/payments\n(PaymentCreateRequest)
+activate Controller
+
+Controller -> Controller: @Valid 검증
+Controller -> Service: processPayment(request)
+activate Service
+
+note right of Service
+    @Transactional
+    전체 작업을 하나의
+    트랜잭션으로 처리
+end note
+
+Service -> Service: 주문 조회\n(OrderRepository)
+
+Service -> PaymentRepo: save(payment)
+activate PaymentRepo
+
+PaymentRepo -> Payment: INSERT INTO payments\n(상태: PENDING)
+activate Payment
+Payment --> PaymentRepo: Payment Entity
+deactivate Payment
+
+PaymentRepo --> Service: Payment Entity
+deactivate PaymentRepo
+
+Service -> PG: requestPayment(amount, method)
+activate PG
+
+note right of PG
+    @Retryable
+    최대 3회 재시도
+    지수 백오프
+end note
+
+PG -> ExternalPG: 결제 요청\n(네트워크 지연 0.5~2초)
+activate ExternalPG
+
+alt PG 호출 성공
+    ExternalPG --> PG: 거래 ID 반환
+    deactivate ExternalPG
+    
+    PG --> Service: transactionId
+    deactivate PG
+    
+    Service -> Payment: complete(transactionId)
+    activate Payment
+    note right of Payment
+        상태 전이
+        PENDING → COMPLETED
+    end note
+    Payment --> Service: 완료
+    deactivate Payment
+    
+    Service -> PaymentRepo: save(payment)
+    activate PaymentRepo
+    PaymentRepo -> Payment: UPDATE payments\n(상태: COMPLETED)
+    Payment --> PaymentRepo: Payment Entity
+    deactivate Payment
+    PaymentRepo --> Service: Payment Entity
+    deactivate PaymentRepo
+    
+    Service --> Controller: PaymentResponse
+    deactivate Service
+    
+    Controller --> Client: 201 Created\n(COMPLETED)
+    
+else PG 호출 실패 (1차 시도)
+    ExternalPG --> PG: PaymentGatewayException
+    deactivate ExternalPG
+    PG --> Service: PaymentGatewayException
+    deactivate PG
+    
+    note right of Service
+        @Retryable 작동
+        1초 후 재시도
+    end note
+    
+    Service -> PG: requestPayment() 재시도
+    activate PG
+    PG -> ExternalPG: 결제 요청 (2차 시도)
+    activate ExternalPG
+    
+    alt 재시도 성공
+        ExternalPG --> PG: 거래 ID 반환
+        deactivate ExternalPG
+        PG --> Service: transactionId
+        deactivate PG
+        
+        Service -> Payment: complete(transactionId)
+        activate Payment
+        Payment --> Service: 완료
+        deactivate Payment
+        
+        Service -> PaymentRepo: save(payment)
+        PaymentRepo --> Service: Payment Entity
+        Service --> Controller: PaymentResponse
+        Controller --> Client: 201 Created\n(COMPLETED)
+        
+    else 재시도 실패 (최대 3회)
+        ExternalPG --> PG: PaymentGatewayException
+        deactivate ExternalPG
+        PG --> Service: PaymentGatewayException
+        deactivate PG
+        
+        Service -> Payment: fail()
+        activate Payment
+        note right of Payment
+            상태 전이
+            PENDING → FAILED
+        end note
+        Payment --> Service: 완료
+        deactivate Payment
+        
+        Service -> PaymentRepo: save(payment)
+        PaymentRepo --> Service: Payment Entity
+        deactivate PaymentRepo
+        
+        Service --> Controller: OrderException
+        deactivate Service
+        
+        Controller --> Client: 400 Bad Request\n(결제 실패)
+    end
+end
+deactivate Controller
+
+@enduml
+
+' ==========================================
+' 상태 전이 다이어그램
+' ==========================================
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title 결제 상태 전이 (State Machine)
+
+state "PENDING\n(대기 중)" as PENDING {
+    [*] --> PENDING
+}
+
+state "COMPLETED\n(완료)" as COMPLETED {
+    COMPLETED : 결제 성공
+    COMPLETED : 거래 ID 저장
+    COMPLETED : paidAt 저장
+}
+
+state "FAILED\n(실패)" as FAILED {
+    FAILED : 결제 실패
+    FAILED : PG 호출 실패
+}
+
+state "REFUNDED\n(환불)" as REFUNDED {
+    REFUNDED : 환불 완료
+    REFUNDED : COMPLETED에서만 가능
+}
+
+PENDING --> COMPLETED : complete(transactionId)\n결제 성공
+PENDING --> FAILED : fail()\n결제 실패
+COMPLETED --> REFUNDED : refund()\n환불 처리
+
+note right of PENDING
+    초기 상태
+    결제 요청 시 생성
+end note
+
+note right of COMPLETED
+    PG 호출 성공
+    거래 ID 저장
+end note
+
+note right of FAILED
+    PG 호출 실패
+    재시도 실패
+end note
+
+note right of REFUNDED
+    환불 완료
+    COMPLETED에서만 전이 가능
+end note
+
+@enduml
+
+' ==========================================
+' 재시도 로직 다이어그램
+' ==========================================
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title 재시도 로직 (@Retryable)
+
+participant "PaymentService" as Service
+participant "PaymentGatewayService" as PG
+database "PG사" as ExternalPG
+
+Service -> PG: requestPayment()\n(1차 시도)
+activate PG
+PG -> ExternalPG: 결제 요청
+activate ExternalPG
+
+ExternalPG --> PG: PaymentGatewayException\n(네트워크 오류)
+deactivate ExternalPG
+PG --> Service: PaymentGatewayException
+deactivate PG
+
+note right of Service
+    @Retryable 작동
+    maxAttempts = 3
+    backoff = 1초, 2초, 4초
+end note
+
+Service -> Service: 1초 대기
+Service -> PG: requestPayment()\n(2차 시도)
+activate PG
+PG -> ExternalPG: 결제 요청
+activate ExternalPG
+
+alt 2차 시도 성공
+    ExternalPG --> PG: transactionId
+    deactivate ExternalPG
+    PG --> Service: transactionId
+    deactivate PG
+    Service --> Service: 결제 완료 처리
+    
+else 2차 시도 실패
+    ExternalPG --> PG: PaymentGatewayException
+    deactivate ExternalPG
+    PG --> Service: PaymentGatewayException
+    deactivate PG
+    
+    Service -> Service: 2초 대기
+    Service -> PG: requestPayment()\n(3차 시도)
+    activate PG
+    PG -> ExternalPG: 결제 요청
+    activate ExternalPG
+    
+    alt 3차 시도 성공
+        ExternalPG --> PG: transactionId
+        deactivate ExternalPG
+        PG --> Service: transactionId
+        deactivate PG
+        Service --> Service: 결제 완료 처리
+        
+    else 3차 시도 실패
+        ExternalPG --> PG: PaymentGatewayException
+        deactivate ExternalPG
+        PG --> Service: PaymentGatewayException
+        deactivate PG
+        Service --> Service: 결제 실패 처리\n(FAILED 상태)
+    end
+end
+
+@enduml
+
+' ==========================================
+' 핵심 메시지 4가지
+' ==========================================
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title 핵심 메시지 4가지
+
+package "1. 결제 프로세스" {
+    class "주문 조회" as Step1
+    class "결제 생성\n(PENDING)" as Step2
+    class "PG 호출" as Step3
+    class "상태 전이" as Step4
+    
+    Step1 --> Step2
+    Step2 --> Step3
+    Step3 --> Step4
+    
+    note right of Step1
+        순서가 중요
+        1. 주문 조회
+        2. 결제 생성
+        3. PG 호출
+        4. 상태 전이
+    end note
+}
+
+package "2. 상태 관리" {
+    class "PENDING" as Pending {
+        초기 상태
+    }
+    
+    class "COMPLETED" as Completed {
+        결제 성공
+    }
+    
+    class "FAILED" as Failed {
+        결제 실패
+    }
+    
+    class "REFUNDED" as Refunded {
+        환불 완료
+    }
+    
+    Pending --> Completed
+    Pending --> Failed
+    Completed --> Refunded
+    
+    note right of Pending
+        State Machine
+        명확한 상태 전이 규칙
+    end note
+}
+
+package "3. 에러 처리 및 재시도" {
+    class "@Retryable" as Retry {
+        최대 3회 재시도
+        지수 백오프
+    }
+    
+    class "PaymentGatewayException" as Exception {
+        재시도 대상 예외
+    }
+    
+    class "타임아웃 처리" as Timeout {
+        네트워크 지연
+        실패 시뮬레이션
+    }
+    
+    Exception --> Retry
+    Timeout --> Exception
+    Retry --> Retry
+    
+    note right of Retry
+        @Retryable
+        자동 재시도
+        백오프 전략
+    end note
+}
+
+package "4. 통합 테스트" {
+    class "@SpringBootTest" as SpringTest {
+        전체 스택 테스트
+    }
+    
+    class "Service 테스트" as ServiceTest {
+        비즈니스 로직 검증
+    }
+    
+    class "상태 전이 검증" as StateTest {
+        PENDING → COMPLETED
+        PENDING → FAILED
+    }
+    
+    SpringTest --> ServiceTest
+    ServiceTest --> StateTest
+    
+    note right of SpringTest
+        @SpringBootTest
+        실제 컨텍스트 로드
+        트랜잭션 롤백
+    end note
+}
+
+@enduml
+
