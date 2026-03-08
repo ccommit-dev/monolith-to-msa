@@ -8,8 +8,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.serializer.JdkSerializationRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
-import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.time.Duration;
@@ -36,13 +36,17 @@ public class CacheConfig {
     @Bean
     @ConditionalOnBean(RedisConnectionFactory.class)
     public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        // DevTools restart classloader 충돌을 줄이기 위해 명시적 classloader 사용
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        JdkSerializationRedisSerializer valueSerializer = new JdkSerializationRedisSerializer(classLoader);
+
         // 기본 캐시 설정 (3600초)
         RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofSeconds(3600))
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         new StringRedisSerializer()))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
-                        RedisSerializer.java()))
+                        valueSerializer))
                 .disableCachingNullValues();
         
         // 상품 조회 캐시 설정 (60초)
@@ -51,7 +55,7 @@ public class CacheConfig {
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         new StringRedisSerializer()))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
-                        RedisSerializer.java()))
+                        valueSerializer))
                 .disableCachingNullValues();
         
         // 재고 조회 캐시 설정 (300초)
@@ -60,7 +64,7 @@ public class CacheConfig {
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         new StringRedisSerializer()))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
-                        RedisSerializer.java()))
+                        valueSerializer))
                 .disableCachingNullValues();
         
         // 캐시별 설정 매핑
@@ -74,4 +78,3 @@ public class CacheConfig {
                 .build();
     }
 }
-
