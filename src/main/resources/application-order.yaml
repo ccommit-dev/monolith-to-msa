@@ -62,7 +62,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,circuitbreakers,circuitbreakerevents
   endpoint:
     health:
       show-details: always
@@ -70,5 +70,49 @@ management:
     export:
       prometheus:
         enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+
+# Resilience4j 설정
+resilience4j:
+  circuitbreaker:
+    instances:
+      paymentService:
+        registerHealthIndicator: true
+        slidingWindowSize: 10                    # 슬라이딩 윈도우 크기
+        minimumNumberOfCalls: 5                  # 최소 호출 횟수
+        permittedNumberOfCallsInHalfOpenState: 3 # Half-Open 상태에서 허용되는 호출 수
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 10s             # Open 상태 유지 시간
+        failureRateThreshold: 50                 # 실패율 임계값 (50%)
+        slowCallRateThreshold: 100                # 느린 호출 임계값 (100%)
+        slowCallDurationThreshold: 2s             # 느린 호출 기준 시간
+        recordExceptions:
+          - com.ccommit.monolith_to_msa.exception.PaymentServiceException
+          - org.springframework.web.reactive.function.client.WebClientException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          - com.ccommit.monolith_to_msa.exception.OrderException
+  
+  retry:
+    instances:
+      paymentService:
+        maxAttempts: 3                           # 최대 재시도 횟수
+        waitDuration: 1s                         # 재시도 대기 시간
+        enableExponentialBackoff: true           # 지수 백오프 활성화
+        exponentialBackoffMultiplier: 2           # 지수 백오프 배수
+        retryExceptions:
+          - com.ccommit.monolith_to_msa.exception.PaymentServiceException
+          - org.springframework.web.reactive.function.client.WebClientException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          - com.ccommit.monolith_to_msa.exception.OrderException
+  
+  timelimiter:
+    instances:
+      paymentService:
+        timeoutDuration: 5s                      # 타임아웃 시간
+        cancelRunningFuture: true                 # 실행 중인 Future 취소
 
 

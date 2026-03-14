@@ -27,7 +27,7 @@ repositories {
 dependencies {
 	// Web
 	implementation 'org.springframework.boot:spring-boot-starter-web'
-	
+
 	// Actuator (Health Check)
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	
@@ -40,7 +40,7 @@ dependencies {
 	// Retry
 	implementation 'org.springframework.retry:spring-retry:2.0.5'
 	implementation 'org.springframework:spring-aspects'
-	
+
 	// Database
 	implementation 'com.h2database:h2'
 	runtimeOnly 'com.mysql:mysql-connector-j'
@@ -55,7 +55,15 @@ dependencies {
 	
 	// Dev Tools
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
-	
+
+	// WebClient (Reactive Web)
+	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	implementation 'io.netty:netty-resolver-dns-native-macos:4.1.104.Final:osx-aarch_64'  // macOS 네이티브 리졸버
+
+	// Resilience4j (Circuit Breaker, Retry, Timeout)
+	implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.1.0'
+	implementation 'io.github.resilience4j:resilience4j-reactor:2.1.0'
+
 	// Test
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

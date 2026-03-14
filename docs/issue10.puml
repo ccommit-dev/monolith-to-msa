@@ -1,0 +1,531 @@
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - 서비스 분리 전략
+
+' ==========================================
+' 서비스 분리 전략: Before & After
+' ==========================================
+
+package "Before: 모놀리식 아키텍처" {
+    component "Monolith Application\n(Port 8080)" as Monolith {
+        component "Product Service" as ProductSvc
+        component "Order Service" as OrderSvc
+        component "Payment Service" as PaymentSvc
+    }
+    database "Single DB\n(testdb)" as SingleDB {
+        entity "orders" as Orders1
+        entity "payments" as Payments1
+        entity "products" as Products1
+    }
+    note right of Monolith
+        문제점:
+        - 모든 서비스가 하나의 DB 공유
+        - 커넥션 풀 경쟁
+        - 서비스 간 장애 전파
+        - 수직 확장만 가능
+    end note
+}
+
+package "After: MSA 아키텍처" {
+    component "Order Service\n(Port 8080)" as OrderService {
+        component "Order API" as OrderAPI
+        component "PaymentClient\n(WebClient)" as PaymentClient
+    }
+    database "Order DB\n(orderdb)" as OrderDB {
+        entity "orders" as Orders2
+    }
+    
+    component "Payment Service\n(Port 8081)" as PaymentService {
+        component "Payment API" as PaymentAPI
+    }
+    database "Payment DB\n(paymentdb)" as PaymentDB {
+        entity "payments" as Payments2
+    }
+    
+    note right of OrderService
+        장점:
+        - 독립적인 DB
+        - 독립적인 커넥션 풀
+        - 서비스별 최적화
+        - 수평 확장 가능
+    end note
+}
+
+OrderService --> PaymentService : REST API\n(WebClient)
+OrderService --> OrderDB : JPA
+PaymentService --> PaymentDB : JPA
+
+@enduml
+
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - Order Service 구조
+
+package "Order Service (Port 8080)" {
+    component "OrderController" as OrderController
+    component "OrderService" as OrderService
+    component "OrderRepository" as OrderRepository
+    component "PaymentClient\n(WebClient)" as PaymentClient
+    
+    database "Order DB\n(orderdb)" as OrderDB {
+        entity "orders" as Orders {
+            * id : BIGINT <<PK>>
+            --
+            * customer_id : VARCHAR(255)
+            * product_id : VARCHAR(255)
+            * quantity : INT
+            * total_price : BIGINT
+            * status : VARCHAR(50)
+            * created_at : TIMESTAMP
+            * updated_at : TIMESTAMP
+        }
+    }
+    
+    note right of PaymentClient
+        WebClient 설정:
+        - 연결 타임아웃: 5초
+        - 응답 타임아웃: 10초
+        - Non-blocking I/O
+    end note
+    
+    note right of OrderDB
+        커넥션 풀:
+        - 최대 20개
+        - 독립적 관리
+    end note
+}
+
+OrderController --> OrderService
+OrderService --> OrderRepository
+OrderService --> PaymentClient
+OrderRepository --> OrderDB
+
+@enduml
+
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - Payment Service 구조
+
+package "Payment Service (Port 8081)" {
+    component "PaymentController" as PaymentController
+    component "PaymentService" as PaymentService
+    component "PaymentRepository" as PaymentRepository
+    component "PaymentGatewayService" as PaymentGateway
+    
+    database "Payment DB\n(paymentdb)" as PaymentDB {
+        entity "payments" as Payments {
+            * id : BIGINT <<PK>>
+            --
+            * order_id : BIGINT <<FK>>
+            * amount : BIGINT
+            * method : VARCHAR(50)
+            * status : VARCHAR(50)
+            transaction_id : VARCHAR(255) <<UNIQUE>>
+            paid_at : TIMESTAMP
+            * created_at : TIMESTAMP
+            * updated_at : TIMESTAMP
+        }
+    }
+    
+    cloud "PG사 API" as PGAPI
+    
+    note right of PaymentDB
+        커넥션 풀:
+        - 최대 20개
+        - 독립적 관리
+    end note
+}
+
+PaymentController --> PaymentService
+PaymentService --> PaymentRepository
+PaymentService --> PaymentGateway
+PaymentRepository --> PaymentDB
+PaymentGateway --> PGAPI
+
+@enduml
+
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - API 통신 시퀀스 (정상 케이스)
+
+participant "Client" as Client
+participant "Order Service\n(Port 8080)" as OrderService
+database "Order DB\n(orderdb)" as OrderDB
+participant "PaymentClient\n(WebClient)" as PaymentClient
+participant "Payment Service\n(Port 8081)" as PaymentService
+database "Payment DB\n(paymentdb)" as PaymentDB
+
+Client -> OrderService: POST /api/orders\n(OrderCreateRequest)
+activate OrderService
+
+OrderService -> OrderDB: 주문 데이터 저장\n(PENDING 상태)
+activate OrderDB
+OrderDB --> OrderService: Order Entity
+deactivate OrderDB
+
+OrderService -> PaymentClient: processPayment(request)\nMono<PaymentResponse>
+activate PaymentClient
+
+note right of PaymentClient
+    WebClient 호출:
+    - Non-blocking I/O
+    - Resilience4j 적용
+    - Circuit Breaker
+    - Retry
+    - Timeout
+end note
+
+PaymentClient -> PaymentService: POST /api/payments\n(PaymentCreateRequest)\nREST API 호출
+activate PaymentService
+
+PaymentService -> PaymentDB: 결제 데이터 저장\n(PENDING 상태)
+activate PaymentDB
+PaymentDB --> PaymentService: Payment Entity
+deactivate PaymentDB
+
+PaymentService -> PaymentService: PG사 결제 요청\n(시뮬레이션)
+note right of PaymentService
+    결제 처리:
+    - PG사 API 호출
+    - 재시도 로직
+    - 실패 시 보상 트랜잭션
+end note
+
+PaymentService -> PaymentDB: 결제 상태 업데이트\n(COMPLETED)
+activate PaymentDB
+PaymentDB --> PaymentService: Payment Entity
+deactivate PaymentDB
+
+PaymentService --> PaymentClient: PaymentResponse\n(결제 결과)
+deactivate PaymentService
+
+PaymentClient --> OrderService: Mono<PaymentResponse>
+deactivate PaymentClient
+
+OrderService -> OrderDB: 주문 상태 업데이트\n(CONFIRMED)
+activate OrderDB
+OrderDB --> OrderService: Order Entity
+deactivate OrderDB
+
+OrderService --> Client: 201 Created\n(OrderResponse)
+note right of OrderService
+    성공 시나리오:
+    - 주문 생성 완료
+    - 결제 완료
+    - 전체 트랜잭션 성공
+end note
+deactivate OrderService
+
+@enduml
+
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - API 통신 시퀀스 (Circuit Breaker & Fallback)
+
+participant "Client" as Client
+participant "Order Service\n(Port 8080)" as OrderService
+database "Order DB\n(orderdb)" as OrderDB
+participant "PaymentClient\n(WebClient)" as PaymentClient
+participant "Resilience4j\nCircuit Breaker" as CircuitBreaker
+participant "Payment Service\n(Port 8081)" as PaymentService
+
+Client -> OrderService: POST /api/orders\n(OrderCreateRequest)
+activate OrderService
+
+OrderService -> OrderDB: 주문 데이터 저장\n(PENDING 상태)
+activate OrderDB
+OrderDB --> OrderService: Order Entity
+deactivate OrderDB
+
+OrderService -> PaymentClient: processPayment(request)
+activate PaymentClient
+
+PaymentClient -> CircuitBreaker: Circuit Breaker 체크
+activate CircuitBreaker
+
+alt Circuit Breaker CLOSED
+    CircuitBreaker -> PaymentService: API 호출 시도
+    activate PaymentService
+    
+    alt Payment Service 정상
+        PaymentService --> CircuitBreaker: PaymentResponse\n(성공)
+        deactivate PaymentService
+        CircuitBreaker --> PaymentClient: 성공 응답
+    else Payment Service 장애
+        PaymentService --> CircuitBreaker: 예외 발생
+        deactivate PaymentService
+        
+        CircuitBreaker -> CircuitBreaker: 실패 카운트 증가
+        note right of CircuitBreaker
+            Circuit Breaker 상태:
+            - 실패율 계산
+            - 50% 이상이면 OPEN
+        end note
+        
+        CircuitBreaker --> PaymentClient: 예외 전파
+    end
+else Circuit Breaker OPEN
+    CircuitBreaker --> PaymentClient: 즉시 실패\n(Fallback 실행)
+    note right of CircuitBreaker
+        Circuit Breaker OPEN:
+        - Payment Service 장애
+        - 즉시 Fallback 실행
+        - 추가 호출 차단
+    end note
+end
+
+deactivate CircuitBreaker
+
+alt Fallback 실행
+    PaymentClient -> PaymentClient: processPaymentFallback()
+    note right of PaymentClient
+        Fallback 처리:
+        - 보류 상태 응답 생성
+        - PaymentStatus.PENDING
+        - 주문은 유지
+    end note
+    PaymentClient --> OrderService: PaymentResponse\n(PENDING 상태)
+else 정상 응답
+    PaymentClient --> OrderService: PaymentResponse\n(COMPLETED 상태)
+end
+
+deactivate PaymentClient
+
+alt 결제 성공
+    OrderService -> OrderDB: 주문 상태 업데이트\n(CONFIRMED)
+    activate OrderDB
+    OrderDB --> OrderService: Order Entity
+    deactivate OrderDB
+else 결제 보류 (Fallback)
+    note right of OrderService
+        Fallback 처리:
+        - 주문은 PENDING 상태 유지
+        - 결제는 나중에 처리 가능
+    end note
+end
+
+OrderService --> Client: 201 Created\n(OrderResponse)
+deactivate OrderService
+
+@enduml
+
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - Resilience4j 구성
+
+package "Resilience4j 설정" {
+    component "Circuit Breaker" as CB {
+        note right
+            설정:
+            - slidingWindowSize: 10
+            - failureRateThreshold: 50%
+            - waitDurationInOpenState: 10s
+            - minimumNumberOfCalls: 5
+        end note
+    }
+    
+    component "Retry" as Retry {
+        note right
+            설정:
+            - maxAttempts: 3
+            - waitDuration: 1s
+            - exponentialBackoff: true
+            - multiplier: 2
+        end note
+    }
+    
+    component "TimeLimiter" as Timeout {
+        note right
+            설정:
+            - timeoutDuration: 5s
+            - cancelRunningFuture: true
+        end note
+    }
+}
+
+component "PaymentClient\n(WebClient)" as PaymentClient
+
+PaymentClient --> CB : @CircuitBreaker
+PaymentClient --> Retry : @Retry
+PaymentClient --> Timeout : @TimeLimiter
+
+note bottom of PaymentClient
+    적용 순서:
+    1. Timeout (5초)
+    2. Retry (최대 3회)
+    3. Circuit Breaker (실패율 체크)
+    4. Fallback (장애 시)
+end note
+
+@enduml
+
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - 독립 배포 구조
+
+package "Docker Compose" {
+    container "Order Service\n(Port 8080)" as OrderContainer {
+        component "Order Service" as OrderService
+        database "Order DB\n(orderdb)" as OrderDB
+    }
+    
+    container "Payment Service\n(Port 8081)" as PaymentContainer {
+        component "Payment Service" as PaymentService
+        database "Payment DB\n(paymentdb)" as PaymentDB
+    }
+    
+    note right of OrderContainer
+        독립 배포:
+        - Docker 컨테이너
+        - 독립적 확장
+        - 독립적 롤백
+    end note
+    
+    note right of PaymentContainer
+        독립 배포:
+        - Docker 컨테이너
+        - 독립적 확장
+        - 독립적 롤백
+    end note
+}
+
+OrderContainer --> PaymentContainer : REST API\n(WebClient)
+
+cloud "Load Balancer" as LB
+LB --> OrderContainer : HTTP
+LB --> PaymentContainer : HTTP
+
+@enduml
+
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - ERD (서비스 분리 후)
+
+package "Order Service" {
+    database "Order DB\n(orderdb)" as OrderDB {
+        entity "orders" as Orders {
+            * id : BIGINT <<PK>>
+            --
+            * customer_id : VARCHAR(255)
+            * product_id : VARCHAR(255)
+            * quantity : INT
+            * total_price : BIGINT
+            * status : VARCHAR(50)
+            * created_at : TIMESTAMP
+            * updated_at : TIMESTAMP
+        }
+    }
+}
+
+package "Payment Service" {
+    database "Payment DB\n(paymentdb)" as PaymentDB {
+        entity "payments" as Payments {
+            * id : BIGINT <<PK>>
+            --
+            * order_id : BIGINT <<FK>>
+            * amount : BIGINT
+            * method : VARCHAR(50)
+            * status : VARCHAR(50)
+            transaction_id : VARCHAR(255) <<UNIQUE>>
+            paid_at : TIMESTAMP
+            * created_at : TIMESTAMP
+            * updated_at : TIMESTAMP
+        }
+    }
+}
+
+note right of Orders
+    Order Service:
+    - 독립적인 DB
+    - 독립적인 스키마
+    - 독립적인 커넥션 풀
+end note
+
+note right of Payments
+    Payment Service:
+    - 독립적인 DB
+    - 독립적인 스키마
+    - 독립적인 커넥션 풀
+    - order_id는 논리적 참조
+    (물리적 FK 없음)
+end note
+
+Orders ..> Payments : 논리적 참조\n(order_id)\n(물리적 FK 없음)
+
+@enduml
+
+@startuml
+!theme plain
+allowmixing
+skinparam backgroundColor #FFFFFF
+
+title Ch06.10: 통신 구조 - WebClient vs RestTemplate
+
+package "RestTemplate (Blocking)" {
+    participant "Thread Pool" as ThreadPool1
+    participant "RestTemplate" as RestTemplate
+    participant "Payment Service" as PaymentService1
+    
+    note right of ThreadPool1
+        스레드 사용:
+        - 요청당 1개 스레드
+        - 동시 처리 제한적
+        - 많은 스레드 필요
+    end note
+}
+
+package "WebClient (Non-blocking)" {
+    participant "Event Loop" as EventLoop
+    participant "WebClient" as WebClient
+    participant "Payment Service" as PaymentService2
+    
+    note right of EventLoop
+        스레드 사용:
+        - 적은 수의 스레드
+        - 논블로킹 I/O
+        - 높은 동시 처리
+    end note
+}
+
+RestTemplate -> ThreadPool1 : 스레드 할당
+ThreadPool1 -> PaymentService1 : HTTP 요청\n(Blocking)
+PaymentService1 --> ThreadPool1 : HTTP 응답
+ThreadPool1 --> RestTemplate : 결과 반환
+
+WebClient -> EventLoop : 이벤트 등록
+EventLoop -> PaymentService2 : HTTP 요청\n(Non-blocking)
+PaymentService2 --> EventLoop : HTTP 응답
+EventLoop --> WebClient : 결과 반환
+
+note bottom
+    성능 비교:
+    - 동시 처리량: WebClient 2-3배 높음
+    - 리소스 사용: WebClient 50% 이상 감소
+    - 응답 시간: 유사하거나 약간 개선
+end note
+
+@enduml
