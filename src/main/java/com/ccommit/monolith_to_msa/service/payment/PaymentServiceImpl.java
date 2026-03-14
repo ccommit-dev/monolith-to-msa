@@ -1,5 +1,6 @@
 package com.ccommit.monolith_to_msa.service.payment;
 
+import com.ccommit.monolith_to_msa.domain.event.PaymentCompletedEvent;
 import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.payment.Payment;
 import com.ccommit.monolith_to_msa.domain.payment.PaymentStatus;
@@ -8,6 +9,7 @@ import com.ccommit.monolith_to_msa.dto.payment.PaymentResponse;
 import com.ccommit.monolith_to_msa.exception.OrderException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.payment.PaymentRepository;
+import com.ccommit.monolith_to_msa.service.event.EventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.retry.annotation.Backoff;
@@ -28,6 +30,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentRepository paymentRepository;
     private final OrderRepository orderRepository;
     private final PaymentGatewayService paymentGatewayService;
+    private final EventPublisher eventPublisher;
     
     @Override
     @Transactional
@@ -58,12 +61,35 @@ public class PaymentServiceImpl implements PaymentService {
             Payment completedPayment = updatePaymentStatus(savedPayment.getId(), PaymentStatus.COMPLETED, transactionId);
             
             log.info("결제 완료: 결제ID={}, 거래ID={}", completedPayment.getId(), transactionId);
+            
+            // 5. 결제 완료 이벤트 발행 (Redis Pub/Sub)
+            PaymentCompletedEvent event = PaymentCompletedEvent.of(
+                    completedPayment.getId(),
+                    completedPayment.getOrder().getId(),
+                    completedPayment.getAmount(),
+                    completedPayment.getTransactionId(),
+                    completedPayment.getStatus().name()
+            );
+            eventPublisher.publishPaymentCompleted(event);
+            log.info("결제 완료 이벤트 발행 완료: 결제ID={}, 주문ID={}", completedPayment.getId(), completedPayment.getOrder().getId());
+            
             return PaymentResponse.from(completedPayment);
             
         } catch (PaymentGatewayException e) {
             // 5. 결제 실패 처리 - 실패 상태로 저장
             log.error("PG사 결제 실패: 결제ID={}, 오류={}", savedPayment.getId(), e.getMessage());
-            updatePaymentStatus(savedPayment.getId(), PaymentStatus.FAILED, null);
+            Payment failedPayment = updatePaymentStatus(savedPayment.getId(), PaymentStatus.FAILED, null);
+            
+            // 6. 결제 실패 이벤트 발행 (Redis Pub/Sub)
+            PaymentCompletedEvent event = PaymentCompletedEvent.of(
+                    failedPayment.getId(),
+                    failedPayment.getOrder().getId(),
+                    failedPayment.getAmount(),
+                    null,
+                    failedPayment.getStatus().name()
+            );
+            eventPublisher.publishPaymentCompleted(event);
+            log.info("결제 실패 이벤트 발행 완료: 결제ID={}, 주문ID={}", failedPayment.getId(), failedPayment.getOrder().getId());
             
             // 실패한 결제도 저장되었으므로 예외를 throw
             throw new OrderException("결제 처리에 실패했습니다: " + e.getMessage(), e);

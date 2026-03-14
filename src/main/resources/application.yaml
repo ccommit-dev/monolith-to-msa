@@ -65,6 +65,12 @@ spring:
   #         max-idle: 8
   #         min-idle: 0
 
+# Logging 설정
+logging:
+  level:
+    io.netty.resolver.dns.DnsServerAddressStreamProviders: OFF  # Netty DNS 경고 완전히 숨김
+    io.netty.resolver.dns: OFF  # Netty DNS 관련 모든 경고 숨김
+
 # Actuator 설정
 management:
   endpoints:

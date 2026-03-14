@@ -1,0 +1,252 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.11: 비동기 처리 - Redis Pub/Sub 및 DLQ
+
+== 1. Redis Pub/Sub 구조 ==
+
+component "Order Service" as OrderService
+component "EventPublisher" as Publisher
+queue "Redis Pub/Sub" as Redis {
+  channel "order:created"
+  channel "payment:completed"
+}
+component "OrderCreatedEventListener" as OrderListener
+component "PaymentCompletedEventListener" as PaymentListener
+component "Payment Service" as PaymentService
+
+OrderService --> Publisher : publishOrderCreated()
+Publisher --> Redis : PUBLISH order:created
+Redis --> OrderListener : SUBSCRIBE order:created
+OrderListener --> PaymentService : processPayment()
+PaymentService --> Publisher : publishPaymentCompleted()
+Publisher --> Redis : PUBLISH payment:completed
+Redis --> PaymentListener : SUBSCRIBE payment:completed
+PaymentListener --> OrderService : updateOrderStatus()
+
+note right of Redis
+    Redis Pub/Sub 특징:
+    - Publish → Subscribe 패턴
+    - 비동기 통신
+    - 여러 구독자 가능
+    - 메시지 순서 보장 안 함
+end note
+
+== 2. 주문 생성 → 결제 처리 시퀀스 ==
+
+actor "Client" as Client
+participant "OrderService" as OrderService
+participant "EventPublisher" as Publisher
+participant "Redis Pub/Sub" as Redis
+participant "OrderCreatedEventListener" as OrderListener
+participant "PaymentService" as PaymentService
+participant "PaymentCompletedEventListener" as PaymentListener
+
+Client -> OrderService: POST /api/orders
+activate OrderService
+
+OrderService -> OrderService: 1. 상품 조회 및 재고 차감
+OrderService -> OrderService: 2. 주문 저장 (PENDING)
+OrderService -> Publisher: publishOrderCreated(event)
+activate Publisher
+Publisher -> Redis: PUBLISH order:created
+deactivate Publisher
+OrderService -> Client: OrderResponse (PENDING)
+deactivate OrderService
+
+Redis -> OrderListener: SUBSCRIBE order:created
+activate OrderListener
+OrderListener -> OrderListener: 이벤트 파싱
+OrderListener -> PaymentService: processPayment() (비동기)
+activate PaymentService
+PaymentService -> PaymentService: 결제 처리
+PaymentService -> Publisher: publishPaymentCompleted(event)
+activate Publisher
+Publisher -> Redis: PUBLISH payment:completed
+deactivate Publisher
+deactivate PaymentService
+deactivate OrderListener
+
+Redis -> PaymentListener: SUBSCRIBE payment:completed
+activate PaymentListener
+PaymentListener -> PaymentListener: 이벤트 파싱
+PaymentListener -> OrderService: updateOrderStatus() (CONFIRMED)
+activate OrderService
+OrderService -> OrderService: 주문 상태 업데이트
+deactivate OrderService
+deactivate PaymentListener
+
+note over OrderService, PaymentListener
+    비동기 처리:
+    - 주문 생성과 결제 처리가 분리
+    - 응답 시간 단축
+    - 확장성 향상
+end note
+
+== 3. DLQ (Dead Letter Queue) 구조 ==
+
+component "Event Listener" as Listener
+database "DeadLetterMessage\n(DB)" as DLQ
+component "DlqProcessor\n(Scheduler)" as Processor
+queue "Redis Pub/Sub" as Redis2
+
+Listener -> Listener: 이벤트 처리 중 예외 발생
+Listener -> DLQ: saveToDLQ()\n(채널, 메시지, 에러)
+activate DLQ
+deactivate DLQ
+
+Processor -> DLQ: findByStatus(PENDING)\n(1분마다)
+activate Processor
+DLQ -> Processor: PENDING 메시지 목록
+Processor -> Processor: retryMessage()\n(재시도)
+Processor -> Redis2: 이벤트 재발행
+Processor -> DLQ: markAsProcessed()\n또는 incrementRetryCount()
+deactivate Processor
+
+note right of DLQ
+    DLQ 특징:
+    - 처리 실패 메시지 저장
+    - 재시도 횟수 관리
+    - 최대 3회 재시도
+    - 상태: PENDING, PROCESSED, FAILED
+end note
+
+== 4. DLQ 재처리 시퀀스 ==
+
+participant "DlqProcessor" as Processor
+database "DeadLetterMessage" as DLQ
+participant "EventPublisher" as Publisher
+queue "Redis Pub/Sub" as Redis3
+
+Processor -> Processor: @Scheduled (1분마다)
+activate Processor
+
+Processor -> DLQ: findByStatusAndRetryCountLessThan\n(PENDING, 3)
+DLQ -> Processor: PENDING 메시지 목록
+
+loop 각 메시지에 대해
+    Processor -> Processor: retryMessage(dlqMessage)
+    Processor -> Processor: JSON 파싱
+    alt 재처리 성공
+        Processor -> Publisher: publishOrderCreated()\n또는 publishPaymentCompleted()
+        Publisher -> Redis3: PUBLISH
+        Processor -> DLQ: markAsProcessed()
+    else 재처리 실패
+        Processor -> DLQ: incrementRetryCount()
+        alt 최대 재시도 횟수 초과
+            Processor -> DLQ: markAsFailed()
+        end
+    end
+    Processor -> DLQ: save(dlqMessage)
+end
+
+deactivate Processor
+
+note over Processor, DLQ
+    DLQ 재처리:
+    - 1분마다 실행
+    - 최대 3회 재시도
+    - 성공 시 PROCESSED
+    - 실패 시 FAILED
+end note
+
+== 5. 이벤트 도메인 모델 ==
+
+class OrderCreatedEvent {
+    +Long orderId
+    +String customerId
+    +String productId
+    +Integer quantity
+    +Long totalPrice
+    +String paymentMethod
+    +LocalDateTime createdAt
+}
+
+class PaymentCompletedEvent {
+    +Long paymentId
+    +Long orderId
+    +Long amount
+    +String transactionId
+    +String status
+    +LocalDateTime completedAt
+}
+
+class DeadLetterMessage {
+    +Long id
+    +String channel
+    +String message
+    +String errorMessage
+    +String stackTrace
+    +Integer retryCount
+    +MessageStatus status
+    +LocalDateTime createdAt
+    +LocalDateTime processedAt
+}
+
+enum MessageStatus {
+    PENDING
+    PROCESSED
+    FAILED
+}
+
+OrderCreatedEvent --> MessageStatus : 없음
+PaymentCompletedEvent --> MessageStatus : 없음
+DeadLetterMessage --> MessageStatus : status
+
+== 6. 전체 아키텍처 ==
+
+package "Order Service" {
+    component "OrderController" as OrderController
+    component "OrderService" as OrderService2
+    component "EventPublisher" as Publisher2
+}
+
+package "Redis Pub/Sub" {
+    queue "order:created" as OrderChannel
+    queue "payment:completed" as PaymentChannel
+}
+
+package "Event Consumers" {
+    component "OrderCreatedEventListener" as OrderListener2
+    component "PaymentCompletedEventListener" as PaymentListener2
+}
+
+package "Payment Service" {
+    component "PaymentService" as PaymentService2
+    component "EventPublisher" as Publisher3
+}
+
+database "Order DB" as OrderDB
+database "Payment DB" as PaymentDB
+database "DLQ DB" as DLQDB
+
+OrderController --> OrderService2
+OrderService2 --> Publisher2
+Publisher2 --> OrderChannel
+OrderChannel --> OrderListener2
+OrderListener2 --> PaymentService2
+PaymentService2 --> Publisher3
+Publisher3 --> PaymentChannel
+PaymentChannel --> PaymentListener2
+PaymentListener2 --> OrderService2
+
+OrderService2 --> OrderDB
+PaymentService2 --> PaymentDB
+OrderListener2 --> DLQDB
+PaymentListener2 --> DLQDB
+
+component "DlqProcessor" as Processor2
+Processor2 --> DLQDB
+Processor2 --> Publisher2
+Processor2 --> Publisher3
+
+note right of OrderChannel
+    이벤트 기반 아키텍처:
+    - 느슨한 결합
+    - 비동기 처리
+    - 확장성
+    - 장애 격리
+end note
+
+@enduml

@@ -51,11 +51,29 @@ spring:
       settings:
         web-allow-others: true
         trace: false
+  
+  # Redis 설정 (Pub/Sub)
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
 
 # Payment Service URL (환경 변수로 주입 가능)
 payment:
   service:
     url: ${PAYMENT_SERVICE_URL:http://localhost:8081}
+
+# Logging 설정
+logging:
+  level:
+    io.netty.resolver.dns.DnsServerAddressStreamProviders: OFF  # Netty DNS 경고 완전히 숨김
+    io.netty.resolver.dns: OFF  # Netty DNS 관련 모든 경고 숨김
 
 # Actuator 설정
 management:

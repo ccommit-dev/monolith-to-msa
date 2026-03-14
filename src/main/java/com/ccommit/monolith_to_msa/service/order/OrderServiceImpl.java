@@ -1,6 +1,7 @@
 package com.ccommit.monolith_to_msa.service.order;
 
 import com.ccommit.monolith_to_msa.client.PaymentClient;
+import com.ccommit.monolith_to_msa.domain.event.OrderCreatedEvent;
 import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.order.OrderStatus;
 import com.ccommit.monolith_to_msa.domain.payment.PaymentStatus;
@@ -14,6 +15,7 @@ import com.ccommit.monolith_to_msa.exception.PaymentServiceException;
 import com.ccommit.monolith_to_msa.exception.ProductNotFoundException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.product.ProductRepository;
+import com.ccommit.monolith_to_msa.service.event.EventPublisher;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -36,15 +38,18 @@ public class OrderServiceImpl implements OrderService {
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
     private final Optional<PaymentClient> paymentClient;
+    private final EventPublisher eventPublisher;
     
     @Autowired
     public OrderServiceImpl(
             OrderRepository orderRepository,
             ProductRepository productRepository,
-            Optional<PaymentClient> paymentClient) {
+            Optional<PaymentClient> paymentClient,
+            EventPublisher eventPublisher) {
         this.orderRepository = orderRepository;
         this.productRepository = productRepository;
         this.paymentClient = paymentClient;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -79,50 +84,18 @@ public class OrderServiceImpl implements OrderService {
         Order savedOrder = orderRepository.save(order);
         log.info("주문 생성 완료: 주문ID={}, 상태={}", savedOrder.getId(), savedOrder.getStatus());
 
-        // 6. Payment Service 호출 (Non-blocking)
-        if (paymentClient.isPresent()) {
-            try {
-                PaymentCreateRequest paymentRequest = PaymentCreateRequest.builder()
-                        .orderId(savedOrder.getId())
-                        .amount(request.getTotalPrice())
-                        .method(request.getPaymentMethod())
-                        .build();
-                
-                // WebClient를 사용한 Non-blocking 호출
-                PaymentResponse paymentResponse = paymentClient.get().processPayment(paymentRequest)
-                        .blockOptional()
-                        .orElse(null);
-                
-                if (paymentResponse != null) {
-                    // 결제 성공 또는 보류 상태 확인
-                    if (paymentResponse.getStatus() == PaymentStatus.COMPLETED) {
-                        // 결제 완료: 주문 상태를 CONFIRMED로 변경
-                        savedOrder.updateStatus(OrderStatus.CONFIRMED);
-                        log.info("결제 완료: 주문ID={}, 결제ID={}, 상태=CONFIRMED", 
-                                savedOrder.getId(), paymentResponse.getId());
-                    } else if (paymentResponse.getStatus() == PaymentStatus.PENDING) {
-                        // Fallback으로 인한 보류 상태: 주문은 유지, 결제는 나중에 처리
-                        log.warn("결제 보류: 주문ID={}, 상태=PENDING (Fallback)", savedOrder.getId());
-                    } else {
-                        // 결제 실패: 주문 취소
-                        savedOrder.cancel();
-                        log.error("결제 실패: 주문ID={}, 상태=CANCELLED", savedOrder.getId());
-                    }
-                } else {
-                    // Payment Service 응답 없음: 주문은 유지, 결제는 보류
-                    log.warn("Payment Service 응답 없음: 주문ID={}, 상태=PENDING (Fallback)", savedOrder.getId());
-                }
-            } catch (PaymentServiceException e) {
-                // Payment Service 호출 실패: Fallback 처리
-                // 주문은 생성되지만 결제는 보류 상태로 처리
-                log.error("Payment Service 호출 실패 (Fallback): 주문ID={}, 오류={}", 
-                        savedOrder.getId(), e.getMessage());
-                // 주문은 PENDING 상태로 유지 (나중에 결제 처리 가능)
-            }
-        } else {
-            // PaymentClient가 없을 경우: 주문만 생성 (결제는 나중에 처리)
-            log.warn("PaymentClient가 없습니다. 주문만 생성: 주문ID={}, 상태=PENDING", savedOrder.getId());
-        }
+        // 6. 주문 생성 이벤트 발행 (Redis Pub/Sub)
+        // 이벤트 기반 아키텍처: 결제 처리는 비동기 Consumer가 처리
+        OrderCreatedEvent event = OrderCreatedEvent.of(
+                savedOrder.getId(),
+                savedOrder.getCustomerId(),
+                savedOrder.getProductId(),
+                savedOrder.getQuantity(),
+                savedOrder.getTotalPrice(),
+                request.getPaymentMethod() != null ? request.getPaymentMethod().name() : null
+        );
+        eventPublisher.publishOrderCreated(event);
+        log.info("주문 생성 이벤트 발행 완료: 주문ID={}", savedOrder.getId());
         
         return OrderResponse.from(savedOrder);
     }

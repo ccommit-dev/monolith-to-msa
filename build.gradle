@@ -49,6 +49,10 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
 	
+	// Jackson (JSON 직렬화)
+	implementation 'com.fasterxml.jackson.core:jackson-databind'
+	implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+	
 	// Lombok
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
@@ -60,6 +64,11 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webflux'
 	implementation 'io.projectreactor.netty:reactor-netty-http'  // Reactor Netty HTTP 클라이언트
 	implementation 'io.projectreactor:reactor-core'  // Reactor Core (Mono, Flux 등)
+	
+	// Netty Native DNS Resolver (MacOS 성능 향상)
+	// 주의: 네이티브 라이브러리 로드 실패 시 경고 발생 (기능에는 영향 없음)
+	// 로깅 레벨을 OFF로 설정하여 경고 숨김
+	// runtimeOnly 'io.netty:netty-resolver-dns-native-macos'
 
 	// Resilience4j (Circuit Breaker, Retry, Timeout)
 	implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.1.0'
