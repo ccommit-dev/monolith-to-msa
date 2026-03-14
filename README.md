@@ -11,6 +11,8 @@
 - Redis 캐시를 통한 성능 최적화
 - Locust를 이용한 부하 테스트 및 병목 분석
 - MSA로의 서비스 분리 및 독립 배포
+- 이벤트 기반 비동기 아키텍처 구현
+- AI 기반 트래픽 이상 탐지 및 자동 대응
 
 ---
 
@@ -262,6 +264,10 @@ server:
 
 ## 🗂️ 실습 단계별 목차
 
+---
+
+## Ch06: 모놀리식 → MSA 전환
+
 ### Ch06.01: 프로젝트 설정 (Issue1)
 - **목표**: Spring Boot 프로젝트 기본 환경 구성
 - **소요 시간**: 약 30분
@@ -373,12 +379,107 @@ server:
 - **목표**: Order Service와 Payment Service 분리
 - **소요 시간**: 약 90분
 - **주요 내용**:
-  - 서비스 분리 전략
-  - Database per Service 패턴
-  - REST API 통신 구현
+  - 서비스 분리 전략 (DDD Bounded Context)
+  - Database per Service 패턴 (orderdb, paymentdb)
+  - REST API 클라이언트 구현 (PaymentClient)
   - Docker Compose 기반 독립 배포
+  - Locust MSA 환경 성능 테스트
 
 [📄 상세 가이드: PRACTICE_GUIDE_ISSUE9.md](./PRACTICE_GUIDE_ISSUE9.md)
+
+---
+
+### Ch06.10: 통신 구조 (Issue10)
+- **목표**: Non-blocking 통신 및 장애 격리 구현
+- **소요 시간**: 약 40분
+- **주요 내용**:
+  - RestTemplate → WebClient 전환 (Non-blocking)
+  - Resilience4j 적용 (Circuit Breaker, Retry, Timeout)
+  - Fallback 구현 (Payment 실패 시 보류 처리)
+  - Circuit Breaker 상태 모니터링 (Actuator)
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE10.md](./PRACTICE_GUIDE_ISSUE10.md)
+
+---
+
+### Ch06.11: 비동기 처리 (Issue11)
+- **목표**: Redis Pub/Sub을 통한 이벤트 기반 아키텍처 구현
+- **소요 시간**: 약 60분
+- **주요 내용**:
+  - Redis Pub/Sub 설정 (order:created, payment:completed 채널)
+  - 이벤트 Publisher / Consumer 구현
+  - 비동기 OrderCreatedEventListener, PaymentCompletedEventListener
+  - Dead Letter Queue (DLQ) 및 재처리 스케줄러
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE11.md](./PRACTICE_GUIDE_ISSUE11.md)
+
+---
+
+### Ch06.12: 성능 비교 - Before vs After (Issue12)
+- **목표**: 모놀리식 vs MSA 개선 사항 성능 비교 검증
+- **소요 시간**: 약 50분
+- **주요 내용**:
+  - Before: TPS ~95 req/s, 평균 응답 8,034ms, 실패율 23.3%
+  - After: TPS ~380 req/s (4배), 평균 응답 11.4ms (99.9% 감소)
+  - 개선 요인 분석 (독립 DB, 비동기, 캐싱, Circuit Breaker)
+  - Ch06 전체 흐름 복습 및 측정→분석→개선→검증 사이클 정리
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE12.md](./PRACTICE_GUIDE_ISSUE12.md)
+
+---
+
+## Ch07: AI 기반 트래픽 이상 탐지
+
+### Ch07.01: AI 트래픽 데이터 수집 (Issue13)
+- **목표**: 핵심 메트릭 수집 및 데이터 파이프라인 구축
+- **소요 시간**: 약 60분
+- **주요 내용**:
+  - 핵심 메트릭 수집 (TPS, Latency, Error Rate, Resource)
+  - HTTP 인터셉터 기반 실시간 메트릭 수집 (MetricInterceptor)
+  - 데이터 파이프라인 구축 (수집 → 저장 → 처리 → 시각화)
+  - Z-score 기반 AI 이상 탐지 (AnomalyDetectionService)
+  - Prometheus + Grafana 대시보드 연동
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE13.md](./PRACTICE_GUIDE_ISSUE13.md)
+
+---
+
+### Ch07.02: AI 이상징후 탐지 (Issue14)
+- **목표**: Baseline Learning 기반 정교한 이상 탐지 및 오탐 최소화
+- **소요 시간**: 약 60분
+- **주요 내용**:
+  - Baseline Learning (7일 정상 패턴 학습, 매일 자정 자동 재학습)
+  - 향상된 이상 탐지 (Z-score 2.5, 신뢰도 0.8, 연속 3개 확인)
+  - HikariCP 기반 커넥션 풀 고갈 자동 감지 (30초 주기)
+  - False Positive 최소화 전략 (오탐 30% → 5%)
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE14.md](./PRACTICE_GUIDE_ISSUE14.md)
+
+---
+
+### Ch07.03: AI 자동알림 대응 (Issue15)
+- **목표**: Alert Fatigue 해결 및 자동 Incident 생성·복구 구현
+- **소요 시간**: 약 60분
+- **주요 내용**:
+  - 인텔리전트 알림 (중요도 우선순위 분류, 알림 그룹화로 100건 → 5건)
+  - 자동 Incident 생성 및 우선순위 분류 (CRITICAL/HIGH/MEDIUM/LOW)
+  - Auto-remediation (커넥션 풀 고갈·리소스 고갈 자동 복구, 최대 3회 시도)
+  - PagerDuty / Opsgenie 연동 (CRITICAL·HIGH On-call 자동 호출)
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE15.md](./PRACTICE_GUIDE_ISSUE15.md)
+
+---
+
+### Ch07.04: AI 근본원인 분석 (Issue16)
+- **목표**: AI 기반 장애 자동 진단 및 엔지니어 협업 모델 구축
+- **소요 시간**: 약 60분
+- **주요 내용**:
+  - 로그 + 메트릭 통합 분석으로 근본 원인 자동 추론
+  - AI 추천 vs 엔지니어 판단 비교 및 협업 모델 구현
+  - Before/After 아키텍처 전환 효과 AI 자동 측정
+  - AI 시대의 엔지니어 역할 (AI Supervisor + Problem Solver)
+
+[📄 상세 가이드: PRACTICE_GUIDE_ISSUE16.md](./PRACTICE_GUIDE_ISSUE16.md)
 
 ---
 
@@ -393,9 +494,10 @@ server:
 - **Git**: 최신 버전
 
 ### 선택 환경
-- **Redis**: Docker 또는 로컬 설치
+- **Redis**: Docker 또는 로컬 설치 (Issue6, Issue11, Issue13 이상 필수)
 - **Postman**: API 테스트용
 - **H2 Console**: 브라우저 기반 DB 접속
+- **Grafana / Prometheus**: Docker Compose 제공 (Issue13 이상)
 
 ---
 
@@ -413,10 +515,9 @@ git checkout issue1  # 또는 issue2, issue3 등
 
 ### 2단계: 단계별 실습
 각 issue별로 브랜치를 체크아웃하여 실습을 진행합니다:
-- `issue1`: 프로젝트 설정
-- `issue2`: 모놀리식 설계
-- `issue3`: 도메인 모델링
-- ... (issue9까지)
+- `issue1` ~ `issue9`: Ch06 모놀리식 → MSA 전환
+- `issue10` ~ `issue12`: Ch06 통신 구조 개선 및 성능 검증
+- `issue13` ~ `issue16`: Ch07 AI 기반 이상 탐지 및 자동 대응
 
 ### 3단계: 빌드 및 실행
 ```bash
@@ -466,7 +567,11 @@ git checkout issue1  # 또는 issue2, issue3 등
 ### 공식 문서
 - [Spring Boot 공식 문서](https://docs.spring.io/spring-boot/docs/current/reference/html/)
 - [Spring Data JPA 공식 문서](https://docs.spring.io/spring-data/jpa/docs/current/reference/html/)
+- [Resilience4j 공식 문서](https://resilience4j.readme.io/)
 - [Locust 공식 문서](https://docs.locust.io/)
+- [Redis Pub/Sub 문서](https://redis.io/docs/manual/pubsub/)
+- [Prometheus 공식 문서](https://prometheus.io/docs/)
+- [Grafana 공식 문서](https://grafana.com/docs/)
 - [Docker 공식 문서](https://docs.docker.com/)
 
 ### GitHub 저장소
@@ -478,6 +583,7 @@ git checkout issue1  # 또는 issue2, issue3 등
 
 전체 실습 완료 여부를 확인하세요:
 
+**Ch06: 모놀리식 → MSA 전환**
 - [ ] Ch06.01: 프로젝트 설정
 - [ ] Ch06.02: 모놀리식 설계
 - [ ] Ch06.03: 도메인 모델링
@@ -487,4 +593,12 @@ git checkout issue1  # 또는 issue2, issue3 등
 - [ ] Ch06.07: Locust 부하 테스트
 - [ ] Ch06.08: 병목 재현
 - [ ] Ch06.09: 서비스 분리
+- [ ] Ch06.10: 통신 구조 (WebClient + Circuit Breaker)
+- [ ] Ch06.11: 비동기 처리 (Redis Pub/Sub + DLQ)
+- [ ] Ch06.12: 성능 비교 (Before vs After)
 
+**Ch07: AI 기반 트래픽 이상 탐지**
+- [ ] Ch07.01: AI 트래픽 데이터 수집
+- [ ] Ch07.02: AI 이상징후 탐지
+- [ ] Ch07.03: AI 자동알림 대응
+- [ ] Ch07.04: AI 근본원인 분석
