@@ -1,6 +1,7 @@
 package com.ccommit.monolith_to_msa.config;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
@@ -21,8 +22,9 @@ import java.util.Map;
  * @EnableCaching: 캐시 기능 활성화
  * TTL 전략: 캐시별로 다른 TTL 설정
  */
-@Configuration
+@Configuration(proxyBeanMethods = false)
 @EnableCaching
+@ConditionalOnClass({RedisConnectionFactory.class, RedisCacheManager.class})
 public class CacheConfig {
     
     /**

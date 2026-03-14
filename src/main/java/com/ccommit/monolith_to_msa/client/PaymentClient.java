@@ -3,24 +3,22 @@ package com.ccommit.monolith_to_msa.client;
 import com.ccommit.monolith_to_msa.dto.payment.PaymentCreateRequest;
 import com.ccommit.monolith_to_msa.dto.payment.PaymentResponse;
 import com.ccommit.monolith_to_msa.exception.PaymentServiceException;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
 import io.github.resilience4j.reactor.retry.RetryOperator;
+import io.github.resilience4j.retry.RetryRegistry;
 import io.github.resilience4j.retry.annotation.Retry;
 import io.github.resilience4j.timelimiter.annotation.TimeLimiter;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
-import reactor.util.retry.RetrySpec;
 
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Payment Service REST API 클라이언트 (WebClient 기반)
@@ -28,14 +26,31 @@ import java.util.concurrent.CompletableFuture;
  * Resilience4j를 통한 Circuit Breaker, Retry, Timeout 적용
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
+@ConditionalOnClass(name = {
+    "org.springframework.web.reactive.function.client.WebClient",
+    "reactor.core.publisher.Mono"
+})
 public class PaymentClient {
     
     private final WebClient webClient;
+    private final CircuitBreakerRegistry circuitBreakerRegistry;
+    private final RetryRegistry retryRegistry;
     
     @Value("${payment.service.url:http://localhost:8081}")
     private String paymentServiceUrl;
+    
+    public PaymentClient(
+            @Value("${payment.service.url:http://localhost:8081}") String paymentServiceUrl,
+            CircuitBreakerRegistry circuitBreakerRegistry,
+            RetryRegistry retryRegistry) {
+        this.paymentServiceUrl = paymentServiceUrl;
+        this.circuitBreakerRegistry = circuitBreakerRegistry;
+        this.retryRegistry = retryRegistry;
+        this.webClient = WebClient.builder()
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(2 * 1024 * 1024))  // 2MB 버퍼 크기
+                .build();
+    }
     
     /**
      * Payment Service에 결제 처리 요청 (Non-blocking)
@@ -75,12 +90,9 @@ public class PaymentClient {
                     log.error("Payment Service 호출 실패: 주문ID={}, 오류={}", 
                             request.getOrderId(), error.getMessage(), error)
                 )
-                .transformDeferred(CircuitBreakerOperator.of("paymentService"))
-                .transformDeferred(RetryOperator.of("paymentService"))
+                .transformDeferred(CircuitBreakerOperator.of(circuitBreakerRegistry.circuitBreaker("paymentService")))
+                .transformDeferred(RetryOperator.of(retryRegistry.retry("paymentService")))
                 .timeout(Duration.ofSeconds(5))
-                .onErrorMap(WebClientResponseException.class, ex -> 
-                    new PaymentServiceException("결제 서비스 호출 실패: " + ex.getMessage(), ex)
-                )
                 .onErrorMap(throwable -> 
                     throwable instanceof PaymentServiceException 
                         ? throwable 
@@ -164,11 +176,13 @@ public class PaymentClient {
                     log.error("Payment Service 결제 조회 실패: 결제ID={}, 오류={}", 
                             paymentId, error.getMessage(), error)
                 )
-                .transformDeferred(CircuitBreakerOperator.of("paymentService"))
-                .transformDeferred(RetryOperator.of("paymentService"))
+                .transformDeferred(CircuitBreakerOperator.of(circuitBreakerRegistry.circuitBreaker("paymentService")))
+                .transformDeferred(RetryOperator.of(retryRegistry.retry("paymentService")))
                 .timeout(Duration.ofSeconds(5))
-                .onErrorMap(WebClientResponseException.class, ex -> 
-                    new PaymentServiceException("결제 조회 실패: " + ex.getMessage(), ex)
+                .onErrorMap(throwable -> 
+                    throwable instanceof PaymentServiceException 
+                        ? throwable 
+                        : new PaymentServiceException("결제 조회 실패: " + throwable.getMessage(), throwable)
                 );
     }
     

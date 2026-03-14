@@ -14,12 +14,13 @@ import com.ccommit.monolith_to_msa.exception.PaymentServiceException;
 import com.ccommit.monolith_to_msa.exception.ProductNotFoundException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.product.ProductRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -28,14 +29,23 @@ import java.util.stream.Collectors;
  * Payment Service와의 통신을 위한 PaymentClient 사용
  */
 @Service
-@RequiredArgsConstructor
 @Transactional(readOnly = true)
 @Slf4j
 public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
-    private final PaymentClient paymentClient;
+    private final Optional<PaymentClient> paymentClient;
+    
+    @Autowired
+    public OrderServiceImpl(
+            OrderRepository orderRepository,
+            ProductRepository productRepository,
+            Optional<PaymentClient> paymentClient) {
+        this.orderRepository = orderRepository;
+        this.productRepository = productRepository;
+        this.paymentClient = paymentClient;
+    }
 
     @Override
     @Transactional
@@ -70,43 +80,48 @@ public class OrderServiceImpl implements OrderService {
         log.info("주문 생성 완료: 주문ID={}, 상태={}", savedOrder.getId(), savedOrder.getStatus());
 
         // 6. Payment Service 호출 (Non-blocking)
-        try {
-            PaymentCreateRequest paymentRequest = PaymentCreateRequest.builder()
-                    .orderId(savedOrder.getId())
-                    .amount(request.getTotalPrice())
-                    .method(request.getPaymentMethod())
-                    .build();
-            
-            // WebClient를 사용한 Non-blocking 호출
-            PaymentResponse paymentResponse = paymentClient.processPayment(paymentRequest)
-                    .blockOptional()
-                    .orElse(null);
-            
-            if (paymentResponse != null) {
-                // 결제 성공 또는 보류 상태 확인
-                if (paymentResponse.getStatus() == PaymentStatus.COMPLETED) {
-                    // 결제 완료: 주문 상태를 CONFIRMED로 변경
-                    savedOrder.updateStatus(OrderStatus.CONFIRMED);
-                    log.info("결제 완료: 주문ID={}, 결제ID={}, 상태=CONFIRMED", 
-                            savedOrder.getId(), paymentResponse.getId());
-                } else if (paymentResponse.getStatus() == PaymentStatus.PENDING) {
-                    // Fallback으로 인한 보류 상태: 주문은 유지, 결제는 나중에 처리
-                    log.warn("결제 보류: 주문ID={}, 상태=PENDING (Fallback)", savedOrder.getId());
+        if (paymentClient.isPresent()) {
+            try {
+                PaymentCreateRequest paymentRequest = PaymentCreateRequest.builder()
+                        .orderId(savedOrder.getId())
+                        .amount(request.getTotalPrice())
+                        .method(request.getPaymentMethod())
+                        .build();
+                
+                // WebClient를 사용한 Non-blocking 호출
+                PaymentResponse paymentResponse = paymentClient.get().processPayment(paymentRequest)
+                        .blockOptional()
+                        .orElse(null);
+                
+                if (paymentResponse != null) {
+                    // 결제 성공 또는 보류 상태 확인
+                    if (paymentResponse.getStatus() == PaymentStatus.COMPLETED) {
+                        // 결제 완료: 주문 상태를 CONFIRMED로 변경
+                        savedOrder.updateStatus(OrderStatus.CONFIRMED);
+                        log.info("결제 완료: 주문ID={}, 결제ID={}, 상태=CONFIRMED", 
+                                savedOrder.getId(), paymentResponse.getId());
+                    } else if (paymentResponse.getStatus() == PaymentStatus.PENDING) {
+                        // Fallback으로 인한 보류 상태: 주문은 유지, 결제는 나중에 처리
+                        log.warn("결제 보류: 주문ID={}, 상태=PENDING (Fallback)", savedOrder.getId());
+                    } else {
+                        // 결제 실패: 주문 취소
+                        savedOrder.cancel();
+                        log.error("결제 실패: 주문ID={}, 상태=CANCELLED", savedOrder.getId());
+                    }
                 } else {
-                    // 결제 실패: 주문 취소
-                    savedOrder.cancel();
-                    log.error("결제 실패: 주문ID={}, 상태=CANCELLED", savedOrder.getId());
+                    // Payment Service 응답 없음: 주문은 유지, 결제는 보류
+                    log.warn("Payment Service 응답 없음: 주문ID={}, 상태=PENDING (Fallback)", savedOrder.getId());
                 }
-            } else {
-                // Payment Service 응답 없음: 주문은 유지, 결제는 보류
-                log.warn("Payment Service 응답 없음: 주문ID={}, 상태=PENDING (Fallback)", savedOrder.getId());
+            } catch (PaymentServiceException e) {
+                // Payment Service 호출 실패: Fallback 처리
+                // 주문은 생성되지만 결제는 보류 상태로 처리
+                log.error("Payment Service 호출 실패 (Fallback): 주문ID={}, 오류={}", 
+                        savedOrder.getId(), e.getMessage());
+                // 주문은 PENDING 상태로 유지 (나중에 결제 처리 가능)
             }
-        } catch (PaymentServiceException e) {
-            // Payment Service 호출 실패: Fallback 처리
-            // 주문은 생성되지만 결제는 보류 상태로 처리
-            log.error("Payment Service 호출 실패 (Fallback): 주문ID={}, 오류={}", 
-                    savedOrder.getId(), e.getMessage());
-            // 주문은 PENDING 상태로 유지 (나중에 결제 처리 가능)
+        } else {
+            // PaymentClient가 없을 경우: 주문만 생성 (결제는 나중에 처리)
+            log.warn("PaymentClient가 없습니다. 주문만 생성: 주문ID={}, 상태=PENDING", savedOrder.getId());
         }
         
         return OrderResponse.from(savedOrder);

@@ -58,7 +58,8 @@ dependencies {
 
 	// WebClient (Reactive Web)
 	implementation 'org.springframework.boot:spring-boot-starter-webflux'
-	implementation 'io.netty:netty-resolver-dns-native-macos:4.1.104.Final:osx-aarch_64'  // macOS 네이티브 리졸버
+	implementation 'io.projectreactor.netty:reactor-netty-http'  // Reactor Netty HTTP 클라이언트
+	implementation 'io.projectreactor:reactor-core'  // Reactor Core (Mono, Flux 등)
 
 	// Resilience4j (Circuit Breaker, Retry, Timeout)
 	implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.1.0'
