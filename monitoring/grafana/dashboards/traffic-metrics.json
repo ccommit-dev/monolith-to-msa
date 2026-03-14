@@ -1,0 +1,52 @@
+{
+  "dashboard": {
+    "title": "Traffic Metrics Dashboard",
+    "panels": [
+      {
+        "title": "TPS (Transactions Per Second)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "traffic_tps",
+            "legendFormat": "{{endpoint}}"
+          }
+        ]
+      },
+      {
+        "title": "Average Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "traffic_latency_avg",
+            "legendFormat": "{{endpoint}}"
+          }
+        ]
+      },
+      {
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "traffic_error_rate",
+            "legendFormat": "{{endpoint}}"
+          }
+        ]
+      },
+      {
+        "title": "Anomaly Detection",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "traffic_anomaly_score",
+            "legendFormat": "{{endpoint}}"
+          }
+        ]
+      }
+    ],
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    }
+  }
+}

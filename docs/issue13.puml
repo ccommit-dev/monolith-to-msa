@@ -1,0 +1,595 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: AI 트래픽 데이터 수집 - 전체 아키텍처
+
+left to right direction
+
+package "애플리케이션" {
+    component "HTTP 요청" as HTTPRequest
+    component "MetricInterceptor" as Interceptor
+    component "MetricCollectorService" as Collector
+    component "AnomalyDetectionService" as AnomalyDetector
+    component "TrafficMetricsController" as Controller
+}
+
+database "H2 Database" as DB {
+    table "traffic_metrics" as MetricsTable
+}
+
+package "모니터링" {
+    component "Prometheus" as Prometheus
+    component "Grafana" as Grafana
+}
+
+HTTPRequest --> Interceptor : HTTP 요청
+Interceptor --> Collector : 메트릭 기록
+Collector --> DB : 메트릭 저장 (1분마다)
+Collector --> MetricsTable : INSERT
+
+AnomalyDetector --> DB : 메트릭 조회
+AnomalyDetector --> MetricsTable : 이상치 업데이트 (1분마다)
+
+Controller --> DB : 메트릭 조회 API
+Controller --> Prometheus : Prometheus 형식 메트릭
+
+Prometheus --> Controller : 메트릭 수집 (15초마다)
+Prometheus --> Grafana : 메트릭 제공
+Grafana --> Prometheus : 쿼리
+
+note right of Collector
+    수집 메트릭:
+    - TPS
+    - Latency (평균, P95, P99)
+    - Error Rate
+    - Resource (CPU, Memory, Connection Pool)
+end note
+
+note right of AnomalyDetector
+    AI 이상 탐지:
+    - 정상 패턴 학습 (1시간마다)
+    - 이상치 감지 (1분마다)
+    - Z-score 기반
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: 데이터 파이프라인 - 수집 → 저장 → 처리 → 시각화
+
+left to right direction
+
+component "1. 수집\n(Collection)" as Collection
+component "2. 저장\n(Storage)" as Storage
+component "3. 처리\n(Processing)" as Processing
+component "4. 시각화\n(Visualization)" as Visualization
+
+Collection --> Storage : 메트릭 데이터
+Storage --> Processing : 메트릭 조회
+Processing --> Storage : 이상치 업데이트
+Storage --> Visualization : 메트릭 조회
+
+note right of Collection
+    구현:
+    - MetricInterceptor
+    - MetricCollectorService
+    주기: 실시간 수집, 1분마다 집계
+end note
+
+note right of Storage
+    구현:
+    - TrafficMetricRepository
+    - H2 Database
+    형식: TrafficMetric 엔티티
+end note
+
+note right of Processing
+    구현:
+    - AnomalyDetectionService
+    방법: Z-score 기반 이상 탐지
+    주기: 1분마다 이상 탐지
+end note
+
+note right of Visualization
+    구현:
+    - Grafana + Prometheus
+    형식: 실시간 대시보드
+    용도: 인사이트 시각화
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: 메트릭 수집 시퀀스
+
+actor "Client" as Client
+participant "MetricInterceptor" as Interceptor
+participant "MetricCollectorService" as Collector
+database "TrafficMetric\nRepository" as Repository
+database "H2 Database" as DB
+
+Client -> Interceptor: HTTP 요청 (/api/orders)
+activate Interceptor
+
+Interceptor -> Interceptor: preHandle()\n시작 시간 기록
+activate Interceptor
+
+Interceptor -> Client: 요청 처리
+deactivate Interceptor
+
+Client --> Interceptor: 응답
+activate Interceptor
+
+Interceptor -> Interceptor: afterCompletion()\n응답 시간 계산
+Interceptor -> Collector: recordRequest(endpoint, responseTime, success)
+activate Collector
+
+Collector -> Collector: MetricWindow에 기록
+note right of Collector
+    실시간 메트릭 수집:
+    - 요청 수
+    - 응답 시간
+    - 성공/실패 여부
+end note
+deactivate Collector
+deactivate Interceptor
+
+== 주기적 집계 (1분마다) ==
+
+Collector -> Collector: @Scheduled collectAndSaveMetrics()
+activate Collector
+
+Collector -> Collector: TPS, Latency, Error Rate 계산
+Collector -> Collector: Resource 사용률 수집
+
+Collector -> Repository: save(TrafficMetric)
+activate Repository
+Repository -> DB: INSERT INTO traffic_metrics
+activate DB
+DB --> Repository: 성공
+deactivate DB
+Repository --> Collector: TrafficMetric
+deactivate Repository
+
+Collector -> Collector: MetricWindow 초기화
+deactivate Collector
+
+note over Client, DB
+    메트릭 수집:
+    - 실시간 수집
+    - 1분마다 집계 및 저장
+    - TPS, Latency, Error Rate, Resource
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: AI 이상 탐지 시퀀스
+
+participant "AnomalyDetectionService" as AnomalyDetector
+database "TrafficMetric\nRepository" as Repository
+database "H2 Database" as DB
+
+== 정상 패턴 학습 (1시간마다) ==
+
+AnomalyDetector -> AnomalyDetector: @Scheduled learnNormalPattern()
+activate AnomalyDetector
+
+AnomalyDetector -> Repository: findByTimestampBetween(1시간 전, 현재)
+activate Repository
+Repository -> DB: SELECT * FROM traffic_metrics
+activate DB
+DB --> Repository: 최근 1시간 메트릭
+deactivate DB
+Repository --> AnomalyDetector: List<TrafficMetric>
+deactivate Repository
+
+AnomalyDetector -> AnomalyDetector: calculatePatternStatistics()
+note right of AnomalyDetector
+    통계 계산:
+    - 평균 TPS, 표준편차
+    - 평균 Latency, 표준편차
+    - 평균 Error Rate, 표준편차
+end note
+
+AnomalyDetector -> AnomalyDetector: normalPattern 저장
+deactivate AnomalyDetector
+
+== 이상치 감지 (1분마다) ==
+
+AnomalyDetector -> AnomalyDetector: @Scheduled detectAnomalies()
+activate AnomalyDetector
+
+AnomalyDetector -> Repository: findByTimestampAfter(1분 전)
+activate Repository
+Repository -> DB: SELECT * FROM traffic_metrics
+activate DB
+DB --> Repository: 최근 1분 메트릭
+deactivate DB
+Repository --> AnomalyDetector: List<TrafficMetric>
+deactivate Repository
+
+loop 각 메트릭에 대해
+    AnomalyDetector -> AnomalyDetector: detectAnomaly(metric)
+    activate AnomalyDetector
+    
+    AnomalyDetector -> AnomalyDetector: Z-score 계산\n(TPS, Latency, Error Rate)
+    AnomalyDetector -> AnomalyDetector: Resource 사용률 확인
+    AnomalyDetector -> AnomalyDetector: 이상치 점수 계산
+    
+    alt 이상치 감지 (score > 0.5)
+        AnomalyDetector -> Repository: update(metric)
+        activate Repository
+        Repository -> DB: UPDATE traffic_metrics\nSET is_anomaly=true
+        activate DB
+        DB --> Repository: 성공
+        deactivate DB
+        Repository --> AnomalyDetector: TrafficMetric
+        deactivate Repository
+        
+        note right of AnomalyDetector
+            이상치 정보:
+            - isAnomaly: true
+            - anomalyScore: 0.0~1.0
+            - anomalyReason: 원인 설명
+        end note
+    end
+    
+    deactivate AnomalyDetector
+end
+
+deactivate AnomalyDetector
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: TrafficMetric ERD
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 10
+
+class TrafficMetric {
+    +Long id
+    +String endpoint
+    +LocalDateTime timestamp
+    --
+    +Double tps
+    +Double avgLatency
+    +Double p95Latency
+    +Double p99Latency
+    --
+    +Double errorRate
+    +Long requestCount
+    +Long errorCount
+    --
+    +Double cpuUsage
+    +Double memoryUsage
+    +Double connectionPoolUsage
+    --
+    +Boolean isAnomaly
+    +Double anomalyScore
+    +String anomalyReason
+    --
+    +LocalDateTime createdAt
+}
+
+note right of TrafficMetric
+    인덱스:
+    - idx_timestamp
+    - idx_endpoint
+    - idx_timestamp_endpoint
+    - idx_anomaly
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: 핵심 메트릭 - TPS, Latency, Error Rate, Resource
+
+left to right direction
+
+== TPS (Transactions Per Second) ==
+
+component "요청 수집" as RequestCount
+component "시간 윈도우" as TimeWindow
+component "TPS 계산" as TPSCalc
+
+RequestCount --> TimeWindow : 요청 수 / 시간
+TimeWindow --> TPSCalc : TPS
+
+note right of TPSCalc
+    용도:
+    - 시스템 처리량 측정
+    - 부하 모니터링
+    - 확장성 판단
+end note
+
+== Latency (응답 시간) ==
+
+component "응답 시간 수집" as LatencyCollect
+component "통계 계산" as LatencyCalc
+
+LatencyCollect --> LatencyCalc : 평균, P95, P99
+
+note right of LatencyCalc
+    용도:
+    - 성능 모니터링
+    - 사용자 경험 측정
+    - 병목 지점 식별
+end note
+
+== Error Rate (에러율) ==
+
+component "에러 수집" as ErrorCollect
+component "에러율 계산" as ErrorCalc
+
+ErrorCollect --> ErrorCalc : 에러 수 / 전체 요청 수 * 100
+
+note right of ErrorCalc
+    용도:
+    - 시스템 안정성 측정
+    - 장애 감지
+    - 품질 모니터링
+end note
+
+== Resource (리소스 사용률) ==
+
+component "CPU 사용률" as CPU
+component "Memory 사용률" as Memory
+component "Connection Pool 사용률" as ConnectionPool
+
+note right of CPU
+    용도:
+    - 리소스 모니터링
+    - 확장성 판단
+    - 최적화 지점 식별
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: AI 이상 탐지 알고리즘
+
+left to right direction
+
+== 정상 패턴 학습 ==
+
+component "과거 데이터 수집\n(최근 1시간)" as PastData
+component "통계 계산" as Statistics
+component "정상 패턴 저장" as NormalPattern
+
+PastData --> Statistics : 평균, 표준편차 계산
+Statistics --> NormalPattern : PatternStatistics
+
+note right of NormalPattern
+    저장 정보:
+    - avgTPS, stdTPS
+    - avgLatency, stdLatency
+    - avgErrorRate, stdErrorRate
+end note
+
+== 이상치 감지 (Z-score) ==
+
+component "현재 메트릭" as CurrentMetric
+component "Z-score 계산" as ZScore
+component "이상치 판단" as AnomalyJudge
+
+CurrentMetric --> ZScore : (값 - 평균) / 표준편차
+ZScore --> AnomalyJudge : |Z-score| > 2.0
+
+note right of AnomalyJudge
+    판단 기준:
+    - TPS: |Z-score| > 2.0
+    - Latency: |Z-score| > 2.0
+    - Error Rate: 평균 + 2*표준편차
+    - CPU: > 80%
+    - Memory: > 85%
+end note
+
+== 이상치 점수 계산 ==
+
+component "가중치 적용" as Weight
+component "점수 합산" as ScoreSum
+component "임계값 판단" as Threshold
+
+Weight --> ScoreSum : TPS(0.3) + Latency(0.3) + Error(0.2) + Resource(0.1)
+ScoreSum --> Threshold : score > 0.5
+
+note right of Threshold
+    이상치 점수:
+    - 범위: 0.0 ~ 1.0
+    - 임계값: 0.5
+    - 0.5 이상 시 이상치로 판단
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: Grafana 대시보드 구성
+
+left to right direction
+
+component "Prometheus" as Prometheus
+component "Grafana" as Grafana
+
+package "대시보드 패널" {
+    component "TPS 그래프" as TPSPanel
+    component "Latency 그래프" as LatencyPanel
+    component "Error Rate 그래프" as ErrorPanel
+    component "이상 탐지 테이블" as AnomalyPanel
+}
+
+Prometheus --> Grafana : 메트릭 제공
+Grafana --> TPSPanel : traffic_tps
+Grafana --> LatencyPanel : traffic_latency_avg
+Grafana --> ErrorPanel : traffic_error_rate
+Grafana --> AnomalyPanel : traffic_anomaly_score
+
+note right of TPSPanel
+    패널:
+    - TPS 그래프 (엔드포인트별)
+    - 시간 범위: 최근 1시간
+    - 새로고침: 10초
+end note
+
+note right of LatencyPanel
+    패널:
+    - 평균 응답 시간 그래프
+    - P95, P99 표시
+    - 임계값 알림
+end note
+
+note right of ErrorPanel
+    패널:
+    - 에러율 그래프
+    - 임계값 알림 (5% 이상)
+    - 트렌드 분석
+end note
+
+note right of AnomalyPanel
+    패널:
+    - 이상치 점수 테이블
+    - 이상치 원인 표시
+    - 알림 설정
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: 핵심 메시지 - 측정 가능한 것만 관리할 수 있다
+
+left to right direction
+
+== 1. 메트릭 수집 ==
+
+component "모든 성능 지표 수집" as CollectAll
+component "데이터 기반 의사결정" as DataDecision
+component "지속적인 모니터링" as ContinuousMonitor
+
+CollectAll --> DataDecision : 추측이 아닌 데이터로 판단
+DataDecision --> ContinuousMonitor : 실시간 모니터링
+
+note right of ContinuousMonitor
+    핵심:
+    - 측정 가능한 것만 관리 가능
+    - 데이터 기반 의사결정
+    - 지속적인 모니터링
+end note
+
+== 2. 데이터 파이프라인 ==
+
+component "수집 → 저장 → 처리 → 시각화" as Pipeline
+component "확장 가능한 구조" as Scalable
+component "실시간 처리" as Realtime
+
+Pipeline --> Scalable : 대용량 데이터 처리
+Scalable --> Realtime : 지연 시간 최소화
+
+note right of Realtime
+    핵심:
+    - 전체 파이프라인 구축
+    - 확장 가능한 구조
+    - 실시간 처리
+end note
+
+== 3. AI는 패턴 인식 도구 ==
+
+component "정상 패턴 학습" as LearnPattern
+component "이상치 감지" as DetectAnomaly
+component "자동화" as Automation
+
+LearnPattern --> DetectAnomaly : 통계적 방법
+DetectAnomaly --> Automation : 수동 → 자동
+
+note right of Automation
+    핵심:
+    - 과거 데이터로 정상 패턴 학습
+    - 통계적 방법으로 이상치 감지
+    - 수동 모니터링에서 자동 감지로
+end note
+
+== 4. 시각화는 인사이트 도구 ==
+
+component "대시보드" as Dashboard
+component "알림" as Alert
+component "트렌드 분석" as Trend
+
+Dashboard --> Alert : 이상 상황 자동 알림
+Alert --> Trend : 시간에 따른 변화 추적
+
+note right of Trend
+    핵심:
+    - 한눈에 보는 시스템 상태
+    - 이상 상황 자동 알림
+    - 시간에 따른 변화 추적
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.01: Prometheus + Grafana 통합
+
+left to right direction
+
+component "Spring Boot App" as App
+component "Prometheus" as Prometheus
+component "Grafana" as Grafana
+
+App --> App: /actuator/prometheus\n/api/metrics/prometheus
+App --> Prometheus: 메트릭 수집 (15초마다)
+Prometheus --> Prometheus: 메트릭 저장
+Prometheus --> Grafana: 메트릭 제공
+Grafana --> Prometheus: 쿼리
+
+note right of App
+    메트릭 제공:
+    - Spring Actuator
+    - Custom Metrics API
+    - Prometheus 형식
+end note
+
+note right of Prometheus
+    기능:
+    - 메트릭 수집
+    - 메트릭 저장
+    - 쿼리 언어 (PromQL)
+    - 알림 규칙
+end note
+
+note right of Grafana
+    기능:
+    - 대시보드 생성
+    - 시각화
+    - 알림 설정
+    - 트렌드 분석
+end note
+
+@enduml

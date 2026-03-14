@@ -1,14 +1,28 @@
 package com.ccommit.monolith_to_msa.config;
 
+import com.ccommit.monolith_to_msa.interceptor.MetricInterceptor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
+    
+    private final MetricInterceptor metricInterceptor;
+    
+    public WebConfig(MetricInterceptor metricInterceptor) {
+        this.metricInterceptor = metricInterceptor;
+    }
+    
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(metricInterceptor)
+                .addPathPatterns("/api/**");
+    }
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
