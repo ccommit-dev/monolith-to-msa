@@ -1,0 +1,646 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: 성능 비교 - Before vs After 아키텍처
+
+left to right direction
+
+== Before: 모놀리식 아키텍처 ==
+
+component "상품 서비스" as ProductService
+component "주문 서비스" as OrderService
+component "결제 서비스" as PaymentService
+
+database "H2 Database\n(testdb)" as MonolithDB
+database "HikariCP\n커넥션 풀\n(max 10)" as Pool
+
+ProductService --> Pool
+OrderService --> Pool
+PaymentService --> Pool
+
+Pool --> MonolithDB
+
+note right of Pool
+    성능 문제:
+    - TPS: ~95 req/s
+    - 평균 응답: 8,034ms
+    - 커넥션 풀 경쟁 (100%)
+    - 장애 전파
+end note
+
+== After: MSA + 개선 사항 ==
+
+package "Order Service" {
+    component "Order API" as OrderAPI
+    component "Order Service" as OrderService2
+    database "HikariCP\n커넥션 풀\n(max 20)" as OrderPool
+    database "Order DB\n(orderdb)" as OrderDB
+}
+
+package "Payment Service" {
+    component "Payment API" as PaymentAPI
+    component "Payment Service" as PaymentService2
+    database "HikariCP\n커넥션 풀\n(max 20)" as PaymentPool
+    database "Payment DB\n(paymentdb)" as PaymentDB
+}
+
+package "Redis" {
+    component "Redis Cache" as RedisCache
+    queue "Redis Pub/Sub" as RedisPubSub
+}
+
+component "Circuit Breaker\n(Resilience4j)" as CircuitBreaker
+
+OrderAPI --> OrderService2
+OrderService2 --> OrderPool
+OrderPool --> OrderDB
+
+PaymentAPI --> PaymentService2
+PaymentService2 --> PaymentPool
+PaymentPool --> PaymentDB
+
+OrderService2 --> RedisCache : 캐싱
+OrderService2 --> RedisPubSub : 이벤트 발행
+RedisPubSub --> PaymentService2 : 이벤트 구독
+
+OrderService2 --> CircuitBreaker
+PaymentService2 --> CircuitBreaker
+
+note right of OrderPool
+    성능 개선:
+    - TPS: ~380 req/s (4배)
+    - 평균 응답: 11.4ms (90% 감소)
+    - 커넥션 풀: 50~70% 사용
+    - 독립적 확장
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: Before vs After 성능 지표 비교
+
+== Before: 모놀리식 성능 지표 ==
+
+| 지표 | 값 |
+| TPS | ~95 req/s |
+| 평균 응답 시간 | 8,034ms |
+| 주문 평균 응답 | 4,113ms |
+| 실패율 | 23.3% |
+| 최대 응답 시간 | 298,000ms |
+| 커넥션 풀 사용률 | 100% |
+
+== After: MSA + 개선 성능 지표 ==
+
+| 지표 | 값 | 개선 |
+| TPS | ~380 req/s | **4배** |
+| 평균 응답 시간 | 11.4ms | **-99.9%** |
+| 주문 평균 응답 | 12.8ms | **-99.7%** |
+| 실패율 | 22.0% | 유사 (실패 응답 속도 개선) |
+| 최대 응답 시간 | 248ms | **-99.9%** |
+| 커넥션 풀 사용률 | 50~70% | **-30%** |
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: Before - 주문 생성 시퀀스 (동기 처리)
+
+actor Client
+participant "Order Service" as OrderService
+database "Order DB\n(testdb)" as OrderDB
+participant "Payment Service" as PaymentService
+database "Payment DB\n(testdb)" as PaymentDB
+
+Client -> OrderService: POST /api/orders
+activate OrderService
+
+OrderService -> OrderDB: 상품 조회
+activate OrderDB
+OrderDB --> OrderService: Product
+deactivate OrderDB
+
+OrderService -> OrderDB: 재고 차감 (비관적 락)
+activate OrderDB
+note right of OrderDB
+    긴 트랜잭션 시간
+    커넥션 점유
+end note
+OrderDB --> OrderService: Stock Updated
+deactivate OrderDB
+
+OrderService -> OrderDB: 주문 저장
+activate OrderDB
+OrderDB --> OrderService: Order (PENDING)
+deactivate OrderDB
+
+OrderService -> PaymentService: processPayment() (동기)
+activate PaymentService
+
+PaymentService -> PaymentDB: 결제 데이터 저장
+activate PaymentDB
+PaymentDB --> PaymentService: Payment (PENDING)
+deactivate PaymentDB
+
+PaymentService -> PaymentService: PG사 결제 요청
+note right of PaymentService
+    외부 API 호출
+    긴 대기 시간
+end note
+
+PaymentService -> PaymentDB: 결제 상태 업데이트
+activate PaymentDB
+PaymentDB --> PaymentService: Payment (COMPLETED)
+deactivate PaymentDB
+
+PaymentService --> OrderService: PaymentResponse
+deactivate PaymentService
+
+OrderService -> OrderDB: 주문 상태 업데이트 (CONFIRMED)
+activate OrderDB
+OrderDB --> OrderService: Order (CONFIRMED)
+deactivate OrderDB
+
+OrderService --> Client: OrderResponse (4,113ms)
+deactivate OrderService
+
+note over Client, PaymentDB
+    문제점:
+    - 동기 처리로 긴 응답 시간
+    - 커넥션 풀 점유 시간 증가
+    - 사용자 대기 시간 증가
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: After - 주문 생성 시퀀스 (비동기 처리)
+
+actor Client
+participant "Order Service" as OrderService
+database "Order DB\n(orderdb)" as OrderDB
+component "Redis Cache" as RedisCache
+component "EventPublisher" as Publisher
+queue "Redis Pub/Sub\n(order:created)" as RedisPubSub
+participant "OrderCreatedEventListener" as Listener
+participant "Payment Service" as PaymentService
+database "Payment DB\n(paymentdb)" as PaymentDB
+
+Client -> OrderService: POST /api/orders
+activate OrderService
+
+OrderService -> RedisCache: 상품 조회 (캐시)
+activate RedisCache
+RedisCache --> OrderService: Product (캐시 히트)
+deactivate RedisCache
+
+OrderService -> OrderDB: 재고 차감 (비관적 락)
+activate OrderDB
+note right of OrderDB
+    독립 DB로 빠른 처리
+    커넥션 풀 여유
+end note
+OrderDB --> OrderService: Stock Updated
+deactivate OrderDB
+
+OrderService -> OrderDB: 주문 저장
+activate OrderDB
+OrderDB --> OrderService: Order (PENDING)
+deactivate OrderDB
+
+OrderService -> Publisher: publishOrderCreated()
+activate Publisher
+Publisher -> RedisPubSub: PUBLISH order:created
+deactivate Publisher
+
+OrderService --> Client: OrderResponse (12.8ms) ✅
+deactivate OrderService
+
+note over Client, OrderService
+    개선:
+    - 즉시 응답 (비동기)
+    - 사용자 대기 시간 제거
+    - 처리량 증가
+end note
+
+RedisPubSub -> Listener: SUBSCRIBE order:created
+activate Listener
+
+Listener -> PaymentService: processPayment() (비동기)
+activate PaymentService
+
+PaymentService -> PaymentDB: 결제 데이터 저장
+activate PaymentDB
+PaymentDB --> PaymentService: Payment (PENDING)
+deactivate PaymentDB
+
+PaymentService -> PaymentService: PG사 결제 요청
+PaymentService -> PaymentDB: 결제 상태 업데이트
+activate PaymentDB
+PaymentDB --> PaymentService: Payment (COMPLETED)
+deactivate PaymentDB
+
+PaymentService -> Publisher: publishPaymentCompleted()
+activate Publisher
+Publisher -> RedisPubSub: PUBLISH payment:completed
+deactivate Publisher
+deactivate PaymentService
+deactivate Listener
+
+note over Listener, PaymentDB
+    비동기 처리:
+    - 주문 생성과 결제 처리 분리
+    - 확장성 향상
+    - 장애 격리
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: 주요 개선 사항 - 독립 DB
+
+left to right direction
+
+== Before: 단일 데이터베이스 ==
+
+database "testdb" as MonolithDB {
+    table products
+    table orders
+    table payments
+}
+
+component "HikariCP\n커넥션 풀\n(max 10)" as Pool
+
+component "상품 서비스" as ProductService
+component "주문 서비스" as OrderService
+component "결제 서비스" as PaymentService
+
+ProductService --> Pool
+OrderService --> Pool
+PaymentService --> Pool
+
+Pool --> MonolithDB
+
+note right of Pool
+    문제점:
+    - 커넥션 풀 경쟁
+    - 서비스 간 영향
+    - 확장성 제약
+end note
+
+== After: Database per Service ==
+
+database "orderdb" as OrderDB {
+    table orders
+}
+
+database "paymentdb" as PaymentDB {
+    table payments
+}
+
+component "Order Service\n커넥션 풀\n(max 20)" as OrderPool
+component "Payment Service\n커넥션 풀\n(max 20)" as PaymentPool
+
+component "Order Service" as OrderService2
+component "Payment Service" as PaymentService2
+
+OrderService2 --> OrderPool
+OrderPool --> OrderDB
+
+PaymentService2 --> PaymentPool
+PaymentPool --> PaymentDB
+
+note right of OrderPool
+    장점:
+    - 독립적인 커넥션 풀
+    - 서비스 간 영향 제거
+    - 독립적 확장 가능
+    - 성능 최적화 가능
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: 주요 개선 사항 - 캐싱
+
+left to right direction
+
+== Before: DB 직접 조회 ==
+
+component "Order Service" as OrderService
+database "Order DB" as OrderDB
+
+OrderService -> OrderDB: SELECT * FROM products
+activate OrderDB
+OrderDB --> OrderService: Product
+deactivate OrderDB
+
+note right of OrderDB
+    문제점:
+    - 반복 조회 시 동일한 쿼리
+    - DB 부하 증가
+    - 네트워크 지연
+end note
+
+== After: Redis 캐싱 ==
+
+component "Order Service" as OrderService2
+component "Redis Cache" as RedisCache
+database "Order DB" as OrderDB2
+
+OrderService2 -> RedisCache: GET product:001
+activate RedisCache
+
+alt 캐시 히트
+    RedisCache --> OrderService2: Product (캐시)
+    note right of RedisCache
+        장점:
+        - 빠른 응답 (<1ms)
+        - DB 부하 감소
+        - 확장성 향상
+    end note
+else 캐시 미스
+    RedisCache --> OrderService2: null
+    deactivate RedisCache
+    
+    OrderService2 -> OrderDB2: SELECT * FROM products
+    activate OrderDB2
+    OrderDB2 --> OrderService2: Product
+    deactivate OrderDB2
+    
+    OrderService2 -> RedisCache: SET product:001
+    activate RedisCache
+    note right of RedisCache
+        다음 조회 시
+        캐시 히트
+    end note
+    deactivate RedisCache
+end
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: 주요 개선 사항 - Circuit Breaker
+
+left to right direction
+
+== Before: 타임아웃까지 대기 ==
+
+component "Order Service" as OrderService
+component "Payment Service" as PaymentService
+
+OrderService -> PaymentService: processPayment()
+activate PaymentService
+
+note right of PaymentService
+    장애 발생 시:
+    - 타임아웃까지 대기
+    - 리소스 낭비
+    - 장애 전파
+end note
+
+PaymentService --> OrderService: Timeout (30초)
+deactivate PaymentService
+
+== After: Circuit Breaker ==
+
+component "Order Service" as OrderService2
+component "Circuit Breaker" as CircuitBreaker
+component "Payment Service" as PaymentService2
+
+OrderService2 -> CircuitBreaker: processPayment()
+activate CircuitBreaker
+
+alt Circuit OPEN (장애)
+    CircuitBreaker --> OrderService2: 즉시 실패 응답
+    note right of CircuitBreaker
+        장점:
+        - 빠른 실패 응답
+        - 리소스 효율성
+        - 장애 격리
+    end note
+else Circuit CLOSED (정상)
+    CircuitBreaker -> PaymentService2: processPayment()
+    activate PaymentService2
+    PaymentService2 --> CircuitBreaker: PaymentResponse
+    deactivate PaymentService2
+    CircuitBreaker --> OrderService2: PaymentResponse
+end
+
+deactivate CircuitBreaker
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: 핵심 메시지 - 측정 → 분석 → 개선 → 검증
+
+left to right direction
+
+== 1. 측정 (Measure) ==
+
+component "Locust\n부하 테스트" as Locust
+component "성능 지표\n수집" as Metrics
+
+Locust -> Metrics: TPS, 응답 시간, 에러율
+
+note right of Metrics
+    핵심:
+    - 측정 없이는 개선 불가능
+    - 정확한 베이스라인 설정
+    - 지표 수집 및 모니터링
+end note
+
+== 2. 분석 (Analyze) ==
+
+component "로그 분석" as LogAnalysis
+component "메트릭 분석" as MetricAnalysis
+component "병목 식별" as Bottleneck
+
+Metrics -> LogAnalysis: 로그 데이터
+Metrics -> MetricAnalysis: 성능 지표
+
+LogAnalysis -> Bottleneck: 문제점 발견
+MetricAnalysis -> Bottleneck: 원인 분석
+
+note right of Bottleneck
+    핵심:
+    - 병목을 찾아야 개선 가능
+    - 근본 원인 파악
+    - 데이터 기반 분석
+end note
+
+== 3. 개선 (Improve) ==
+
+component "독립 DB" as IndependentDB
+component "비동기 처리" as Async
+component "캐싱" as Caching
+component "Circuit Breaker" as CB
+
+Bottleneck -> IndependentDB: 서비스 분리
+Bottleneck -> Async: 이벤트 기반 처리
+Bottleneck -> Caching: Redis 캐싱
+Bottleneck -> CB: 장애 격리
+
+note right of CB
+    핵심:
+    - 측정 → 분석 → 개선 순환
+    - 점진적 개선
+    - 효과 검증
+end note
+
+== 4. 검증 (Verify) ==
+
+component "Before vs After\n비교" as Comparison
+component "개선 효과\n검증" as Verification
+
+IndependentDB -> Comparison: 성능 비교
+Async -> Comparison: 성능 비교
+Caching -> Comparison: 성능 비교
+CB -> Comparison: 성능 비교
+
+Comparison -> Verification: TPS 4배, 응답 90% 감소
+
+note right of Verification
+    핵심:
+    - 개선 효과 검증 필수
+    - 지속적인 모니터링
+    - 다음 개선 계획
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: Ch06 전체 흐름 복습
+
+left to right direction
+
+component "Ch06.07\n성능 측정" as Ch07
+component "Ch06.08\n병목 분석" as Ch08
+component "Ch06.09\n서비스 분리" as Ch09
+component "Ch06.10\n캐싱 + Circuit Breaker" as Ch10
+component "Ch06.11\n비동기 처리" as Ch11
+component "Ch06.12\n성능 비교" as Ch12
+
+Ch07 -> Ch08: 병목 현상 발견
+Ch08 -> Ch09: MSA 전환 필요
+Ch09 -> Ch10: 성능 최적화
+Ch10 -> Ch11: 비동기 처리
+Ch11 -> Ch12: 개선 효과 검증
+
+note right of Ch07
+    목표: 현재 성능 파악
+    도구: Locust
+    결과: 베이스라인 설정
+end note
+
+note right of Ch08
+    문제: 커넥션 풀 고갈
+    원인: 모놀리식 한계
+    해결: MSA 전환
+end note
+
+note right of Ch09
+    작업: 서비스 분리
+    효과: 독립 DB
+    결과: 응답 시간 개선
+end note
+
+note right of Ch10
+    작업: 캐싱 + Circuit Breaker
+    효과: DB 부하 감소
+    결과: 안정성 향상
+end note
+
+note right of Ch11
+    작업: 비동기 처리
+    효과: 응답 시간 단축
+    결과: 처리량 증가
+end note
+
+note right of Ch12
+    작업: 성능 비교
+    효과: TPS 4배, 응답 90% 감소
+    결과: 개선 효과 검증
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.12: 성능 개선 효과 요약
+
+left to right direction
+
+== TPS 4배 증가 ==
+
+component "Before\n~95 req/s" as BeforeTPS
+component "After\n~380 req/s" as AfterTPS
+
+BeforeTPS -> AfterTPS: 4배 증가
+
+note right of AfterTPS
+    요인:
+    1. 독립 DB (커넥션 풀 경쟁 제거)
+    2. 비동기 처리 (처리량 증가)
+    3. 캐싱 (DB 부하 감소)
+    4. Circuit Breaker (리소스 효율성)
+end note
+
+== 응답 시간 90% 감소 ==
+
+component "Before\n8,034ms" as BeforeRT
+component "After\n11.4ms" as AfterRT
+
+BeforeRT -> AfterRT: 99.9% 감소
+
+note right of AfterRT
+    요인:
+    1. 독립 DB (대기 시간 감소)
+    2. 비동기 처리 (즉시 응답)
+    3. 캐싱 (조회 시간 단축)
+    4. Circuit Breaker (빠른 실패)
+end note
+
+== 주요 개선 사항 ==
+
+component "독립 DB" as DB
+component "비동기" as Async
+component "캐싱" as Cache
+component "Circuit Breaker" as CB
+
+DB -> AfterTPS: 커넥션 풀 경쟁 제거
+Async -> AfterTPS: 처리량 증가
+Cache -> AfterTPS: DB 부하 감소
+CB -> AfterTPS: 리소스 효율성
+
+DB -> AfterRT: 대기 시간 감소
+Async -> AfterRT: 즉시 응답
+Cache -> AfterRT: 조회 시간 단축
+CB -> AfterRT: 빠른 실패
+
+@enduml
