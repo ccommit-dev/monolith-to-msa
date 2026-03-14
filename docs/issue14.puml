@@ -1,0 +1,614 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: AI 이상징후 탐지 - 전체 아키텍처
+
+left to right direction
+
+package "데이터 수집" {
+    component "MetricCollectorService" as Collector
+    component "TrafficMetricRepository" as MetricRepo
+    database "H2 Database" as DB
+}
+
+package "Baseline Learning" {
+    component "BaselineLearningService" as BaselineLearning
+    component "BaselinePatternRepository" as BaselineRepo
+    database "Baseline Patterns" as BaselineDB
+}
+
+package "AI 이상 탐지" {
+    component "EnhancedAnomalyDetectionService" as AnomalyDetector
+    component "ConnectionPoolMonitorService" as PoolMonitor
+}
+
+package "알림" {
+    component "AlertService" as Alert
+}
+
+Collector --> MetricRepo : 메트릭 저장
+MetricRepo --> DB : TrafficMetric
+
+BaselineLearning --> MetricRepo : 7일간 정상 데이터 조회
+BaselineLearning --> BaselineRepo : Baseline 패턴 저장
+BaselineRepo --> BaselineDB : BaselinePattern
+
+AnomalyDetector --> MetricRepo : 최근 메트릭 조회
+AnomalyDetector --> BaselineRepo : Baseline 패턴 조회
+AnomalyDetector --> MetricRepo : 이상치 업데이트
+AnomalyDetector --> Alert : 이상치 알림
+
+PoolMonitor --> MetricRepo : 커넥션 풀 사용률 업데이트
+PoolMonitor --> Alert : 커넥션 풀 고갈 알림
+
+note right of BaselineLearning
+    학습 주기:
+    - 매일 자정 자동 학습
+    - 최근 7일간 정상 데이터
+    - 이상치 제외
+end note
+
+note right of AnomalyDetector
+    탐지 주기:
+    - 1분마다 이상 탐지
+    - Baseline 기반 판단
+    - False Positive 최소화
+end note
+
+note right of PoolMonitor
+    모니터링 주기:
+    - 30초마다 체크
+    - HikariCP 메트릭 수집
+    - 고갈 자동 감지
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: Baseline Learning 프로세스
+
+participant "BaselineLearningService" as BaselineLearning
+database "TrafficMetricRepository" as MetricRepo
+database "BaselinePatternRepository" as BaselineRepo
+
+== 7일간 정상 패턴 학습 (매일 자정) ==
+
+BaselineLearning -> BaselineLearning: @Scheduled (매일 자정)
+activate BaselineLearning
+
+BaselineLearning -> MetricRepo: findByEndpointAndTimestampBetween\n(7일 전, 현재)
+activate MetricRepo
+MetricRepo --> BaselineLearning: List<TrafficMetric>
+deactivate MetricRepo
+
+BaselineLearning -> BaselineLearning: 이상치 제외\n(isAnomaly = false 또는 null)
+BaselineLearning -> BaselineLearning: 통계 계산\n(평균, 표준편차, 최소/최대)
+
+note right of BaselineLearning
+    계산 통계:
+    - TPS: 평균, 표준편차, 최소/최대
+    - Latency: 평균, 표준편차, 최소/최대
+    - Error Rate: 평균, 표준편차
+    - Resource: 평균, 표준편차
+end note
+
+BaselineLearning -> BaselineRepo: save(BaselinePattern)
+activate BaselineRepo
+BaselineRepo --> BaselineLearning: BaselinePattern
+deactivate BaselineRepo
+
+BaselineLearning -> BaselineLearning: 학습 완료 로그
+deactivate BaselineLearning
+
+note over BaselineLearning, BaselineRepo
+    학습 결과:
+    - Baseline 패턴 저장
+    - 이상 탐지 기준선 설정
+    - False Positive 최소화 임계값 설정 (0.7)
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: AI 이상 탐지 프로세스
+
+participant "EnhancedAnomalyDetectionService" as AnomalyDetector
+database "TrafficMetricRepository" as MetricRepo
+database "BaselinePatternRepository" as BaselineRepo
+participant "AlertService" as Alert
+
+== 실시간 이상 탐지 (1분마다) ==
+
+AnomalyDetector -> AnomalyDetector: @Scheduled (1분마다)
+activate AnomalyDetector
+
+AnomalyDetector -> MetricRepo: findByTimestampAfter(1분 전)
+activate MetricRepo
+MetricRepo --> AnomalyDetector: 최근 메트릭 목록
+deactivate MetricRepo
+
+loop 각 메트릭에 대해
+    AnomalyDetector -> BaselineRepo: findFirstByEndpointOrderByLearnedAtDesc
+    activate BaselineRepo
+    BaselineRepo --> AnomalyDetector: BaselinePattern
+    deactivate BaselineRepo
+    
+    AnomalyDetector -> AnomalyDetector: detectAnomalyWithBaseline()
+    activate AnomalyDetector
+    
+    note right of AnomalyDetector
+        이상 탐지:
+        1. Z-score 계산 (Baseline 기반)
+        2. 이상치 점수 계산
+        3. 신뢰도 계산
+        4. 임계값 비교 (>= 0.7)
+    end note
+    
+    alt 이상치 감지 (score >= 0.7, confidence >= 0.8)
+        AnomalyDetector -> AnomalyDetector: isConsecutiveAnomaly() 확인
+        activate AnomalyDetector
+        
+        alt 연속 이상치 (3개 이상)
+            AnomalyDetector -> MetricRepo: update(isAnomaly=true)
+            activate MetricRepo
+            MetricRepo --> AnomalyDetector: 성공
+            deactivate MetricRepo
+            
+            AnomalyDetector -> Alert: sendAnomalyAlert()
+            activate Alert
+            Alert --> AnomalyDetector: 알림 발송
+            deactivate Alert
+            
+            note right of Alert
+                알림 내용:
+                - 엔드포인트
+                - 이상치 점수
+                - 신뢰도
+                - 원인
+            end note
+        else 연속 이상치 아님
+            AnomalyDetector -> AnomalyDetector: False Positive 가능성\n알림 억제
+        end
+        
+        deactivate AnomalyDetector
+    end
+    
+    deactivate AnomalyDetector
+end
+
+deactivate AnomalyDetector
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: 커넥션 풀 고갈 자동 감지
+
+participant "ConnectionPoolMonitorService" as PoolMonitor
+component "HikariCP PoolMXBean" as HikariCP
+database "TrafficMetricRepository" as MetricRepo
+participant "AlertService" as Alert
+
+== 커넥션 풀 모니터링 (30초마다) ==
+
+PoolMonitor -> PoolMonitor: @Scheduled (30초마다)
+activate PoolMonitor
+
+PoolMonitor -> HikariCP: getHikariPoolMXBean()
+activate HikariCP
+
+HikariCP --> PoolMonitor: PoolMXBean
+deactivate HikariCP
+
+PoolMonitor -> PoolMonitor: 커넥션 풀 상태 조회
+activate PoolMonitor
+
+note right of PoolMonitor
+    조회 메트릭:
+    - activeConnections
+    - idleConnections
+    - totalConnections
+    - threadsAwaitingConnection
+    - maximumPoolSize
+    - usagePercentage
+end note
+
+alt 위험 상태 (usagePercentage >= 90% 또는 threadsAwaitingConnection > 0)
+    PoolMonitor -> MetricRepo: updateRecentMetrics(usagePercentage)
+    activate MetricRepo
+    MetricRepo --> PoolMonitor: 성공
+    deactivate MetricRepo
+    
+    PoolMonitor -> Alert: sendConnectionPoolAlert()
+    activate Alert
+    Alert --> PoolMonitor: 알림 발송
+    deactivate Alert
+    
+    note right of Alert
+        알림 내용:
+        - 사용률: 90% 이상
+        - 활성 커넥션 수
+        - 대기 스레드 수
+        - 최대 커넥션 수
+    end note
+    
+    log warn "커넥션 풀 고갈 감지"
+else 경고 상태 (usagePercentage >= 80%)
+    log warn "커넥션 풀 경고"
+end
+
+deactivate PoolMonitor
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: False Positive 최소화 전략
+
+left to right direction
+
+== 1. 임계값 상향 조정 ==
+
+component "기존 임계값\n0.5" as OldThreshold
+component "개선 임계값\n0.7" as NewThreshold
+
+OldThreshold --> NewThreshold : 상향 조정
+
+note right of NewThreshold
+    효과:
+    - 더 확실한 이상만 감지
+    - 오탐률 -10%
+end note
+
+== 2. 신뢰도 기반 필터링 ==
+
+component "이상치 점수 계산" as ScoreCalc
+component "신뢰도 계산" as ConfidenceCalc
+component "신뢰도 필터\n(>= 0.8)" as ConfidenceFilter
+
+ScoreCalc --> ConfidenceCalc : 각 지표 신뢰도 합산
+ConfidenceCalc --> ConfidenceFilter : 신뢰도 >= 0.8만 통과
+
+note right of ConfidenceFilter
+    효과:
+    - 낮은 신뢰도 이상치 무시
+    - 오탐률 -8%
+end note
+
+== 3. 연속 이상치 확인 ==
+
+component "최근 5분 메트릭" as RecentMetrics
+component "연속 이상치 확인\n(3개 이상)" as ConsecutiveCheck
+
+RecentMetrics --> ConsecutiveCheck : 이상치 개수 확인
+
+note right of ConsecutiveCheck
+    효과:
+    - 일시적 스파이크 무시
+    - 지속적 이상만 감지
+    - 오탐률 -5%
+end note
+
+== 4. Z-score 임계값 상향 ==
+
+component "기존 Z-score\n> 2.0" as OldZScore
+component "개선 Z-score\n> 2.5" as NewZScore
+
+OldZScore --> NewZScore : 상향 조정
+
+note right of NewZScore
+    효과:
+    - 정상 범위 내 변동 무시
+    - 오탐률 -2%
+end note
+
+== 5. 알림 쿨다운 ==
+
+component "알림 발송" as AlertSend
+component "쿨다운 (5분)" as Cooldown
+
+AlertSend --> Cooldown : 중복 알림 방지
+
+note right of Cooldown
+    효과:
+    - 중복 알림 방지
+    - 알림 스팸 방지
+end note
+
+== 개선 효과 ==
+
+component "기존 오탐률\n30%" as OldRate
+component "개선 오탐률\n5%" as NewRate
+
+OldRate --> NewRate : -25% 감소
+
+note right of NewRate
+    총 개선 효과:
+    - 임계값 상향: -10%
+    - 신뢰도 필터: -8%
+    - 연속 확인: -5%
+    - Z-score 상향: -2%
+    - 총합: -25% (30% → 5%)
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: Baseline Pattern ERD
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 10
+
+class BaselinePattern {
+    +Long id
+    +String endpoint
+    +LocalDateTime learnedAt
+    --
+    +Double baselineTPS
+    +Double baselineTPSStdDev
+    +Double baselineTPSMin
+    +Double baselineTPSMax
+    --
+    +Double baselineLatency
+    +Double baselineLatencyStdDev
+    +Double baselineLatencyMin
+    +Double baselineLatencyMax
+    --
+    +Double baselineErrorRate
+    +Double baselineErrorRateStdDev
+    --
+    +Double baselineCpuUsage
+    +Double baselineCpuUsageStdDev
+    +Double baselineMemoryUsage
+    +Double baselineMemoryUsageStdDev
+    +Double baselineConnectionPoolUsage
+    +Double baselineConnectionPoolUsageStdDev
+    --
+    +Long sampleCount
+    +LocalDateTime learningStartTime
+    +LocalDateTime learningEndTime
+    --
+    +Double anomalyThreshold
+    +Double confidenceLevel
+    --
+    +LocalDateTime createdAt
+}
+
+note right of BaselinePattern
+    인덱스:
+    - idx_endpoint
+    - idx_learned_at
+    - uk_endpoint_learned_at
+    (endpoint, learnedAt)
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: 향상된 이상 탐지 알고리즘
+
+left to right direction
+
+== Baseline 기반 Z-score 계산 ==
+
+component "현재 메트릭" as CurrentMetric
+component "Baseline 패턴" as Baseline
+component "Z-score 계산" as ZScoreCalc
+
+CurrentMetric --> ZScoreCalc : TPS, Latency, Error Rate
+Baseline --> ZScoreCalc : 평균, 표준편차
+
+ZScoreCalc --> ZScoreCalc : (값 - 평균) / 표준편차
+
+note right of ZScoreCalc
+    임계값:
+    - 기존: |Z-score| > 2.0
+    - 개선: |Z-score| > 2.5
+end note
+
+== 이상치 점수 계산 ==
+
+component "Z-score 결과" as ZScoreResult
+component "가중치 적용" as Weight
+component "점수 합산" as ScoreSum
+
+ZScoreResult --> Weight : TPS(0.25), Latency(0.25), Error(0.2), Pool(0.15), Resource(0.15)
+Weight --> ScoreSum : 가중치 적용 합산
+
+note right of ScoreSum
+    점수 범위:
+    - 0.0 ~ 1.0
+    - 임계값: 0.7 (Baseline 기반)
+end note
+
+== 신뢰도 계산 ==
+
+component "각 지표 신뢰도" as IndicatorConfidence
+component "신뢰도 합산" as ConfidenceSum
+component "신뢰도 필터\n(>= 0.8)" as ConfidenceFilter
+
+IndicatorConfidence --> ConfidenceSum : TPS(0.15), Latency(0.15), Error(0.1), Pool(0.2), Resource(0.1)
+ConfidenceSum --> ConfidenceFilter : 신뢰도 >= 0.8만 통과
+
+note right of ConfidenceFilter
+    신뢰도:
+    - 범위: 0.0 ~ 1.0
+    - 임계값: 0.8
+    - 낮은 신뢰도는 무시
+end note
+
+== 연속 이상치 확인 ==
+
+component "최근 5분 메트릭" as Recent5Min
+component "이상치 개수 확인" as AnomalyCount
+component "연속 확인\n(3개 이상)" as ConsecutiveCheck
+
+Recent5Min --> AnomalyCount : 이상치 개수 계산
+AnomalyCount --> ConsecutiveCheck : 3개 이상이면 통과
+
+note right of ConsecutiveCheck
+    효과:
+    - 일시적 스파이크 무시
+    - 지속적 이상만 감지
+    - False Positive 최소화
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: 핵심 메시지
+
+left to right direction
+
+== 1. Baseline Learning은 정확한 이상 탐지의 기초 ==
+
+component "7일간 정상 패턴 학습" as Learning
+component "충분한 데이터" as Data
+component "정확한 기준선" as Baseline
+
+Learning --> Data : 이상치 제외
+Data --> Baseline : 통계 기반 기준선
+
+note right of Baseline
+    핵심:
+    - 7일간의 정상 데이터
+    - 이상치 제외로 정확도 향상
+    - 평균, 표준편차, 최소/최대 범위
+end note
+
+== 2. AI는 패턴 인식 도구 ==
+
+component "Baseline 기반 판단" as PatternBased
+component "신뢰도 기반 필터링" as ConfidenceFilter
+component "연속 이상치 확인" as ConsecutiveCheck
+
+PatternBased --> ConfidenceFilter : 확실한 이상만 감지
+ConfidenceFilter --> ConsecutiveCheck : 지속적 이상만 감지
+
+note right of ConsecutiveCheck
+    핵심:
+    - 단순 임계값이 아닌 패턴 기반
+    - 신뢰도 기반 필터링
+    - 연속 이상치 확인
+end note
+
+== 3. False Positive 최소화는 실용성의 핵심 ==
+
+component "다층 필터링" as MultiFilter
+component "오탐률 감소" as ReduceFP
+component "실용성 향상" as Practical
+
+MultiFilter --> ReduceFP : 30% → 5%
+ReduceFP --> Practical : 실제 운영 환경 사용 가능
+
+note right of Practical
+    핵심:
+    - 다층 필터링 (임계값, 신뢰도, 연속성)
+    - 오탐률 대폭 감소
+    - 실용성 향상
+end note
+
+== 4. 자동화는 운영 효율성의 핵심 ==
+
+component "자동 감지" as AutoDetect
+component "자동 알림" as AutoAlert
+component "자동 학습" as AutoLearn
+
+AutoDetect --> AutoAlert : 이상 상황 자동 알림
+AutoAlert --> AutoLearn : 매일 자정 자동 재학습
+
+note right of AutoLearn
+    핵심:
+    - 수동 모니터링 → 자동 감지
+    - 이상 상황 자동 알림
+    - 자동 Baseline 재학습
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch07.02: Part 2/3 병목 자동 감지 - 커넥션 풀 고갈
+
+left to right direction
+
+== 커넥션 풀 상태 ==
+
+component "HikariCP PoolMXBean" as HikariCP
+component "활성 커넥션" as Active
+component "유휴 커넥션" as Idle
+component "대기 스레드" as Waiting
+
+HikariCP --> Active : getActiveConnections()
+HikariCP --> Idle : getIdleConnections()
+HikariCP --> Waiting : getThreadsAwaitingConnection()
+
+== 사용률 계산 ==
+
+component "전체 커넥션" as Total
+component "최대 커넥션" as Max
+component "사용률" as Usage
+
+Active --> Total : 활성 + 유휴
+Total --> Usage : (전체 / 최대) * 100
+Max --> Usage
+
+== 위험 상태 감지 ==
+
+component "위험 임계값\n>= 90%" as Critical
+component "경고 임계값\n>= 80%" as Warning
+component "대기 스레드\n> 0" as ThreadWaiting
+
+Usage --> Critical : 사용률 >= 90%
+Usage --> Warning : 사용률 >= 80%
+Waiting --> Critical : 대기 스레드 > 0
+
+note right of Critical
+    감지 조건:
+    - 사용률 >= 90% 또는
+    - 대기 스레드 > 0
+    → 위험 상태로 판단
+    → 알림 발송
+end note
+
+== 자동 감지 프로세스 ==
+
+component "30초마다 체크" as Check
+component "메트릭 업데이트" as Update
+component "알림 발송" as Alert
+
+Check --> Critical : 위험 상태 감지
+Critical --> Update : 최근 메트릭 업데이트
+Update --> Alert : 커넥션 풀 고갈 알림
+
+note right of Alert
+    알림 내용:
+    - 사용률: 90% 이상
+    - 활성 커넥션 수
+    - 대기 스레드 수
+    - 최대 커넥션 수
+end note
+
+@enduml

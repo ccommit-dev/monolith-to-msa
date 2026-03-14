@@ -59,4 +59,10 @@ public interface TrafficMetricRepository extends JpaRepository<TrafficMetric, Lo
      * 특정 시간 이후의 메트릭 조회
      */
     List<TrafficMetric> findByTimestampAfter(LocalDateTime timestamp);
+    
+    /**
+     * 고유한 엔드포인트 목록 조회
+     */
+    @Query("SELECT DISTINCT m.endpoint FROM TrafficMetric m")
+    List<String> findDistinctEndpoints();
 }
