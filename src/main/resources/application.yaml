@@ -21,6 +21,13 @@ spring:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.H2Dialect
+    defer-datasource-initialization: true  # data.sql 실행을 위해 필요
+  
+  # SQL 초기화 설정
+  sql:
+    init:
+      mode: always  # 항상 data.sql 실행
+      continue-on-error: false  # 오류 발생 시 중단
   
   # H2 Console
   h2:
@@ -34,21 +41,21 @@ spring:
   # Redis Cache 설정
   # Redis가 없으면 type을 simple로 변경
   cache:
-    type: redis  # Redis 없이 테스트 시: type: simple
+    type: simple  # Redis 없이 테스트 시: type: simple, Redis 사용 시: type: redis
     redis:
       time-to-live: 3600000  # 기본 TTL: 3600초 (1시간)
   
-  # Redis 설정
-  data:
-    redis:
-      host: localhost
-      port: 6379
-      timeout: 2000ms
-      lettuce:
-        pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
+  # Redis 설정 (Redis 사용 시 주석 해제)
+  # data:
+  #   redis:
+  #     host: localhost
+  #     port: 6379
+  #     timeout: 2000ms
+  #     lettuce:
+  #       pool:
+  #         max-active: 8
+  #         max-idle: 8
+  #         min-idle: 0
 
 # Actuator 설정
 management:
