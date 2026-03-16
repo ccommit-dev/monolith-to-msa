@@ -11,6 +11,14 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password: sa
+    # HikariCP 커넥션 풀 설정 (병목 재현용: max 10)
+    hikari:
+      maximum-pool-size: 10  # 최대 커넥션 수 (병목 재현을 위해 낮게 설정)
+      minimum-idle: 5         # 최소 유휴 커넥션 수
+      connection-timeout: 30000  # 커넥션 획득 대기 시간 (30초)
+      idle-timeout: 600000   # 유휴 커넥션 타임아웃 (10분)
+      max-lifetime: 1800000   # 커넥션 최대 생명주기 (30분)
+      leak-detection-threshold: 60000  # 커넥션 누수 감지 (60초)
   
   # JPA 설정
   jpa:
@@ -62,10 +70,16 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
 
 # Server 설정
 server:
