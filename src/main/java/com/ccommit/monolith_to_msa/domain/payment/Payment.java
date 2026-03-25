@@ -1,6 +1,4 @@
 package com.ccommit.monolith_to_msa.domain.payment;
-
-import com.ccommit.monolith_to_msa.domain.order.Order;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -19,9 +17,8 @@ public class Payment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "order_id", nullable = false)
-    private Order order;
+    @Column(name = "order_id", nullable = false)
+    private Long orderId;
 
     @Column(nullable = false)
     private Long amount;
@@ -60,8 +57,8 @@ public class Payment {
     }
 
     @Builder
-    public Payment(Order order, Long amount, PaymentMethod method, PaymentStatus status, String transactionId) {
-        this.order = order;
+    public Payment(Long orderId, Long amount, PaymentMethod method, PaymentStatus status, String transactionId) {
+        this.orderId = orderId;
         this.amount = amount;
         this.method = method;
         this.status = status != null ? status : PaymentStatus.PENDING;
@@ -95,8 +92,8 @@ public class Payment {
         return this.status == PaymentStatus.COMPLETED;
     }
 
-    public void setOrder(Order order) {
-        this.order = order;
+    public void setOrderId(Long orderId) {
+        this.orderId = orderId;
     }
 }
 
