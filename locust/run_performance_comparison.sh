@@ -106,15 +106,15 @@ echo ""
 
 read -p "성능 비교 리포트를 생성하시겠습니까? (y/n): " run_compare
 if [ "$run_compare" == "y" ]; then
-    BEFORE_CSV_DIR="results_before_vu${vu_count}"
-    AFTER_CSV_DIR="results_after_vu${vu_count}"
+    BEFORE_PREFIX="results_before_vu${vu_count}"
+    AFTER_PREFIX="results_after_vu${vu_count}"
     
-    if [ -d "$BEFORE_CSV_DIR" ] && [ -d "$AFTER_CSV_DIR" ]; then
-        python3 compare_performance.py "$BEFORE_CSV_DIR" "$AFTER_CSV_DIR"
+    # Locust --csv=PREFIX 는 PREFIX_stats.csv 파일을 현재 디렉터리에 생성함 (디렉터리가 아님)
+    if [ -f "${BEFORE_PREFIX}_stats.csv" ] && [ -f "${AFTER_PREFIX}_stats.csv" ]; then
+        python3 compare_performance.py "$BEFORE_PREFIX" "$AFTER_PREFIX"
     else
-        echo "❌ CSV 디렉토리를 찾을 수 없습니다."
-        echo "   Before: $BEFORE_CSV_DIR"
-        echo "   After: $AFTER_CSV_DIR"
+        echo "❌ Locust 통계 CSV를 찾을 수 없습니다."
+        echo "   기대 파일: ${BEFORE_PREFIX}_stats.csv , ${AFTER_PREFIX}_stats.csv"
     fi
 fi
 

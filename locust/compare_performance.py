@@ -44,12 +44,33 @@ class EndpointMetrics:
     requests_per_second: float
 
 
+def resolve_locust_stats_csv(path_or_prefix: str) -> Optional[Path]:
+    """
+    Locust --csv=NAME 은 현재 작업 디렉터리에 NAME_stats.csv 를 생성한다.
+    인자: CSV 접두사(예: results_before_vu100), 또는 *_stats.csv 경로, 또는 stats.csv가 있는 디렉터리.
+    """
+    p = Path(path_or_prefix)
+    if p.is_file():
+        if p.name.endswith("_stats.csv") or p.name == "stats.csv":
+            return p
+        return None
+    if p.is_dir():
+        direct = p / "stats.csv"
+        if direct.exists():
+            return direct
+        return None
+    candidate = Path(f"{path_or_prefix}_stats.csv")
+    if candidate.exists():
+        return candidate
+    return None
+
+
 class PerformanceComparator:
     """성능 비교 분석기"""
     
-    def __init__(self, before_csv_dir: str, after_csv_dir: str):
-        self.before_csv_dir = Path(before_csv_dir)
-        self.after_csv_dir = Path(after_csv_dir)
+    def __init__(self, before_csv_arg: str, after_csv_arg: str):
+        self.before_csv_arg = before_csv_arg
+        self.after_csv_arg = after_csv_arg
     
     def parse_csv(self, csv_file: Path) -> Dict[str, EndpointMetrics]:
         """CSV 파일 파싱"""
@@ -76,11 +97,12 @@ class PerformanceComparator:
         
         return metrics
     
-    def get_aggregated_metrics(self, csv_dir: Path) -> Optional[PerformanceMetrics]:
-        """Aggregated 메트릭 추출"""
-        stats_file = csv_dir / "stats.csv"
+    def get_aggregated_metrics(self, path_or_prefix: str) -> Optional[PerformanceMetrics]:
+        """Aggregated 메트릭 추출 (Locust stats CSV)"""
+        stats_file = resolve_locust_stats_csv(path_or_prefix)
         
-        if not stats_file.exists():
+        if not stats_file:
+            print(f"통계 파일을 찾을 수 없습니다: {path_or_prefix} (예: results_before_vu100 또는 results_before_vu100_stats.csv)")
             return None
         
         try:
@@ -108,8 +130,8 @@ class PerformanceComparator:
     
     def compare(self) -> Dict:
         """성능 비교 분석"""
-        before_metrics = self.get_aggregated_metrics(self.before_csv_dir)
-        after_metrics = self.get_aggregated_metrics(self.after_csv_dir)
+        before_metrics = self.get_aggregated_metrics(self.before_csv_arg)
+        after_metrics = self.get_aggregated_metrics(self.after_csv_arg)
         
         if not before_metrics or not after_metrics:
             print("경고: Before 또는 After 메트릭을 찾을 수 없습니다.")
@@ -191,18 +213,20 @@ class PerformanceComparator:
 def main():
     """메인 함수"""
     if len(sys.argv) < 3:
-        print("사용법: python compare_performance.py <before_csv_dir> <after_csv_dir>")
-        print("예시: python compare_performance.py results_monolith_vu100 results_msa_vu100")
+        print("사용법: python compare_performance.py <before_prefix> <after_prefix> [output.json]")
+        print("예시: python compare_performance.py results_before_vu100 results_after_vu100")
+        print("      (locust --csv=results_before_vu100 로 생성된 results_before_vu100_stats.csv 를 찾음)")
         sys.exit(1)
     
-    before_csv_dir = sys.argv[1]
-    after_csv_dir = sys.argv[2]
+    before_arg = sys.argv[1]
+    after_arg = sys.argv[2]
+    out_json = sys.argv[3] if len(sys.argv) > 3 else "performance_comparison.json"
     
-    comparator = PerformanceComparator(before_csv_dir, after_csv_dir)
+    comparator = PerformanceComparator(before_arg, after_arg)
     comparison = comparator.compare()
     
     if comparison:
-        comparator.generate_report(comparison, "performance_comparison.json")
+        comparator.generate_report(comparison, out_json)
     else:
         print("❌ 성능 비교 실패: 메트릭을 찾을 수 없습니다.")
 
