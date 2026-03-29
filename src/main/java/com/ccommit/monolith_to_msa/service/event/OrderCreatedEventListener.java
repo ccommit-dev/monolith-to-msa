@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.Message;
+import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.stereotype.Component;
 
 import java.io.PrintWriter;
@@ -24,7 +25,7 @@ import static com.ccommit.monolith_to_msa.config.RedisPubSubConfig.ORDER_CREATED
  */
 @Component
 @Slf4j
-public class OrderCreatedEventListener {
+public class OrderCreatedEventListener implements MessageListener {
     
     private final PaymentClient paymentClient;
     private final DeadLetterMessageRepository dlqRepository;

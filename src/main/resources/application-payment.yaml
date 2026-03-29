@@ -52,6 +52,18 @@ spring:
         web-allow-others: true
         trace: false
 
+  # Redis (결제 완료 이벤트 Pub/Sub — Order Consumer와 동일 브로커 필요)
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
 # Actuator 설정
 management:
   endpoints:

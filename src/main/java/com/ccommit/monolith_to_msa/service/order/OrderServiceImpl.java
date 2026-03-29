@@ -1,17 +1,12 @@
 package com.ccommit.monolith_to_msa.service.order;
 
-import com.ccommit.monolith_to_msa.client.PaymentClient;
 import com.ccommit.monolith_to_msa.domain.event.OrderCreatedEvent;
 import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.order.OrderStatus;
-import com.ccommit.monolith_to_msa.domain.payment.PaymentStatus;
 import com.ccommit.monolith_to_msa.domain.product.Product;
 import com.ccommit.monolith_to_msa.dto.order.OrderCreateRequest;
 import com.ccommit.monolith_to_msa.dto.order.OrderResponse;
-import com.ccommit.monolith_to_msa.dto.payment.PaymentCreateRequest;
-import com.ccommit.monolith_to_msa.dto.payment.PaymentResponse;
 import com.ccommit.monolith_to_msa.exception.InsufficientStockException;
-import com.ccommit.monolith_to_msa.exception.PaymentServiceException;
 import com.ccommit.monolith_to_msa.exception.ProductNotFoundException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.product.ProductRepository;
@@ -22,13 +17,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
  * Order 서비스 구현체
  * Repository 인터페이스에 의존 (DIP 적용)
- * Payment Service와의 통신을 위한 PaymentClient 사용
+ * 결제는 Redis 이벤트(`OrderCreated`) 후 비동기 Consumer·Payment API로 처리
  */
 @Service
 @Transactional(readOnly = true)
@@ -37,18 +31,15 @@ public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
-    private final Optional<PaymentClient> paymentClient;
     private final EventPublisher eventPublisher;
     
     @Autowired
     public OrderServiceImpl(
             OrderRepository orderRepository,
             ProductRepository productRepository,
-            Optional<PaymentClient> paymentClient,
             EventPublisher eventPublisher) {
         this.orderRepository = orderRepository;
         this.productRepository = productRepository;
-        this.paymentClient = paymentClient;
         this.eventPublisher = eventPublisher;
     }
 

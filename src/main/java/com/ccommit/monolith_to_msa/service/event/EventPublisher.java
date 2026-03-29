@@ -6,8 +6,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.listener.ChannelTopic;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import static com.ccommit.monolith_to_msa.config.RedisPubSubConfig.ORDER_CREATED_CHANNEL;
@@ -20,11 +19,11 @@ import static com.ccommit.monolith_to_msa.config.RedisPubSubConfig.PAYMENT_COMPL
 @Slf4j
 public class EventPublisher {
     
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
     
-    public EventPublisher(RedisTemplate<String, Object> redisTemplate) {
-        this.redisTemplate = redisTemplate;
+    public EventPublisher(StringRedisTemplate stringRedisTemplate) {
+        this.stringRedisTemplate = stringRedisTemplate;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
     }
@@ -35,7 +34,7 @@ public class EventPublisher {
     public void publishOrderCreated(OrderCreatedEvent event) {
         try {
             String message = objectMapper.writeValueAsString(event);
-            redisTemplate.convertAndSend(ORDER_CREATED_CHANNEL, message);
+            stringRedisTemplate.convertAndSend(ORDER_CREATED_CHANNEL, message);
             log.info("주문 생성 이벤트 발행: 주문ID={}, 채널={}", event.getOrderId(), ORDER_CREATED_CHANNEL);
         } catch (JsonProcessingException e) {
             log.error("주문 생성 이벤트 발행 실패: 주문ID={}, 오류={}", event.getOrderId(), e.getMessage(), e);
@@ -49,7 +48,7 @@ public class EventPublisher {
     public void publishPaymentCompleted(PaymentCompletedEvent event) {
         try {
             String message = objectMapper.writeValueAsString(event);
-            redisTemplate.convertAndSend(PAYMENT_COMPLETED_CHANNEL, message);
+            stringRedisTemplate.convertAndSend(PAYMENT_COMPLETED_CHANNEL, message);
             log.info("결제 완료 이벤트 발행: 결제ID={}, 주문ID={}, 채널={}", 
                     event.getPaymentId(), event.getOrderId(), PAYMENT_COMPLETED_CHANNEL);
         } catch (JsonProcessingException e) {

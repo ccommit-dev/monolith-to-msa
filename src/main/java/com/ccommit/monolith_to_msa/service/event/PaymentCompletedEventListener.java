@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.Message;
+import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,7 +26,7 @@ import static com.ccommit.monolith_to_msa.config.RedisPubSubConfig.PAYMENT_COMPL
  */
 @Component
 @Slf4j
-public class PaymentCompletedEventListener {
+public class PaymentCompletedEventListener implements MessageListener {
     
     private final OrderRepository orderRepository;
     private final DeadLetterMessageRepository dlqRepository;

@@ -77,7 +77,8 @@ class OrderControllerTest {
                                 "customerId": "customer-001",
                                 "productId": "product-001",
                                 "quantity": 2,
-                                "totalPrice": 20000
+                                "totalPrice": 20000,
+                                "paymentMethod": "CREDIT_CARD"
                             }
                             """))
                 .andExpect(status().isCreated())
@@ -124,7 +125,8 @@ class OrderControllerTest {
                                 "customerId": "customer-001",
                                 "productId": "product-999",
                                 "quantity": 1,
-                                "totalPrice": 10000
+                                "totalPrice": 10000,
+                                "paymentMethod": "CREDIT_CARD"
                             }
                             """))
                 .andExpect(status().isNotFound())
@@ -156,7 +158,8 @@ class OrderControllerTest {
                                 "customerId": "customer-001",
                                 "productId": "product-001",
                                 "quantity": 10,
-                                "totalPrice": 100000
+                                "totalPrice": 100000,
+                                "paymentMethod": "CREDIT_CARD"
                             }
                             """))
                 .andExpect(status().isBadRequest())
