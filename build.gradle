@@ -61,9 +61,9 @@ dependencies {
 	implementation 'io.projectreactor.netty:reactor-netty-http'  // Reactor Netty HTTP 클라이언트
 	implementation 'io.projectreactor:reactor-core'  // Reactor Core (Mono, Flux 등)
 
-	// Resilience4j (Circuit Breaker, Retry, Timeout)
-	implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.1.0'
-	implementation 'io.github.resilience4j:resilience4j-reactor:2.1.0'
+	// Resilience4j (Circuit Breaker, Retry, Timeout) — 2.3.x: Spring Boot 4 Actuator 연동 보완
+	implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.3.0'
+	implementation 'io.github.resilience4j:resilience4j-reactor:2.3.0'
 
 	// Test
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'

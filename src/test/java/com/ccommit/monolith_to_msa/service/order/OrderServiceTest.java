@@ -2,6 +2,7 @@ package com.ccommit.monolith_to_msa.service.order;
 
 import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.order.OrderStatus;
+import com.ccommit.monolith_to_msa.domain.payment.PaymentMethod;
 import com.ccommit.monolith_to_msa.domain.product.Product;
 import com.ccommit.monolith_to_msa.dto.order.OrderCreateRequest;
 import com.ccommit.monolith_to_msa.dto.order.OrderResponse;
@@ -12,7 +13,7 @@ import com.ccommit.monolith_to_msa.repository.product.ProductRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -36,8 +37,12 @@ class OrderServiceTest {
     @Mock
     private ProductRepository productRepository;
 
-    @InjectMocks
     private OrderServiceImpl orderService;
+
+    @BeforeEach
+    void setUp() {
+        orderService = new OrderServiceImpl(orderRepository, productRepository, Optional.empty());
+    }
 
     @Test
     @DisplayName("주문 생성 성공 - 재고 차감 및 주문 생성")
@@ -59,6 +64,7 @@ class OrderServiceTest {
         request.setProductId(productId);
         request.setQuantity(quantity);
         request.setTotalPrice(totalPrice);
+        request.setPaymentMethod(PaymentMethod.CREDIT_CARD);
 
         Order savedOrder = Order.builder()
                 .customerId("customer-001")
@@ -101,6 +107,7 @@ class OrderServiceTest {
         request.setProductId(productId);
         request.setQuantity(1);
         request.setTotalPrice(10000L);
+        request.setPaymentMethod(PaymentMethod.CREDIT_CARD);
 
         when(productRepository.findByProductIdWithLock(productId))
                 .thenReturn(Optional.empty());
@@ -133,6 +140,7 @@ class OrderServiceTest {
         request.setProductId(productId);
         request.setQuantity(quantity);
         request.setTotalPrice(100000L);
+        request.setPaymentMethod(PaymentMethod.CREDIT_CARD);
 
         when(productRepository.findByProductIdWithLock(productId))
                 .thenReturn(Optional.of(product));
@@ -163,6 +171,7 @@ class OrderServiceTest {
         request.setProductId(productId);
         request.setQuantity(2);
         request.setTotalPrice(20000L);
+        request.setPaymentMethod(PaymentMethod.CREDIT_CARD);
 
         when(productRepository.findByProductIdWithLock(productId))
                 .thenReturn(Optional.of(product));

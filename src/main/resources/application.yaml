@@ -70,10 +70,14 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        # Resilience4j 서킷 브레이커 조회·이벤트 (기본 프로필에서도 404 방지)
+        include: health,info,metrics,prometheus,circuitbreakers,circuitbreakerevents
   endpoint:
     health:
       show-details: always
+  health:
+    circuitbreakers:
+      enabled: true
   metrics:
     export:
       prometheus:
@@ -86,6 +90,45 @@ management:
 payment:
   service:
     url: ${PAYMENT_SERVICE_URL:http://localhost:8081}
+
+# Resilience4j (PaymentClient·Actuator /actuator/circuitbreakers 연동 — order 프로필 없이 기동 시에도 동일 인스턴스명)
+resilience4j:
+  circuitbreaker:
+    instances:
+      paymentService:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 10s
+        failureRateThreshold: 50
+        slowCallRateThreshold: 100
+        slowCallDurationThreshold: 2s
+        recordExceptions:
+          - com.ccommit.monolith_to_msa.exception.PaymentServiceException
+          - org.springframework.web.reactive.function.client.WebClientException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          - com.ccommit.monolith_to_msa.exception.OrderException
+  retry:
+    instances:
+      paymentService:
+        maxAttempts: 3
+        waitDuration: 1s
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+        retryExceptions:
+          - com.ccommit.monolith_to_msa.exception.PaymentServiceException
+          - org.springframework.web.reactive.function.client.WebClientException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          - com.ccommit.monolith_to_msa.exception.OrderException
+  timelimiter:
+    instances:
+      paymentService:
+        timeoutDuration: 5s
+        cancelRunningFuture: true
 
 # Server 설정
 server:
