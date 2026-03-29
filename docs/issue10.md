@@ -869,6 +869,65 @@ PowerShell에서 본문만 예쁘게 보려면(선택):
 curl.exe -s http://localhost:8080/actuator/circuitbreakers | ConvertFrom-Json | ConvertTo-Json -Depth 10
 ```
 
+#### 의미 있는 응답 받기 — 404·연결 실패 없이 호출하는 절차
+
+아래를 순서대로 맞추면 **`HTTP 200`** 과 **`paymentService`** 가 담긴 JSON을 기대할 수 있습니다. (빈 이벤트 배열은 정상일 수 있음.)
+
+**1. 먼저 “누가 8080을 듣는지” 확인**
+
+| 증상 | 의미 | 조치 |
+|:---|:---|:---|
+| `curl: (7) Failed to connect ... 8080` | **리스너 없음** | Order 앱/컨테이너를 기동했는지, 포트가 8080인지 확인 |
+| `404` + JSON에 `path`만 있음 | **엔드포인트 미노출 또는 Resilience4j 미등록** | 아래 3번 조건 확인 |
+| `200` + `"circuitBreakers":{"paymentService":{...}}` | **정상** | 아래 “기대 응답” 참고 |
+
+**2-A. 로컬에서 JVM으로 띄우는 경우**
+
+1. 프로젝트 루트에서 `gradlew.bat bootRun`(또는 IDE에서 `MonolithToMsaApplication` 실행).
+2. 프로필을 바꿨다면 **`order`** 등에서도 `application-*.yaml`에 `circuitbreakers` / `circuitbreakerevents` 노출이 있는지 확인.
+3. 준비 확인:
+   ```bash
+   curl -s -o NUL -w "health HTTP:%{http_code}\n" http://localhost:8080/actuator/health
+   ```
+   - Windows CMD: `curl -s http://localhost:8080/actuator | findstr circuitbreaker`
+   - PowerShell/Bash: `curl -s http://localhost:8080/actuator` 본문에 `"circuitbreakers"` 문자열이 포함되는지 확인  
+   링크가 보이면 Actuator에 서킷 엔드포인트가 등록된 상태입니다.
+
+**2-B. Docker Compose (`docker-compose-msa.yml`)로 띄우는 경우**
+
+1. 호스트 **8080·8081** 이 비어 있는지 확인(이미 쓰이면 `Bind ... failed: port is already allocated` 로 컨테이너가 안 뜸).
+2. 빌드 포함 기동:
+   ```bash
+   docker compose -f docker-compose-msa.yml up -d --build
+   ```
+3. **Payment가 healthy** 된 뒤 Order가 올라오므로, **30~60초 정도 대기** 후 호출하는 것이 안전합니다.
+4. 상태 확인:
+   ```bash
+   docker compose -f docker-compose-msa.yml ps
+   docker compose -f docker-compose-msa.yml logs --tail=50 order-service
+   ```
+5. 호스트에서 curl 대상은 **항상 Order 서비스** → `http://localhost:8080/actuator/...` (Payment는 8081).
+
+**3. 404를 막는 설정·의존성 (이미 저장소에 반영된 전제)**
+
+- `management.endpoints.web.exposure.include`에 **`circuitbreakers`**, **`circuitbreakerevents`** 포함 (`application.yaml` 또는 `application-order.yaml`).
+- **`resilience4j.circuitbreaker.instances.paymentService`** 정의 + `build.gradle`의 **`resilience4j-spring-boot3` 2.3.0 이상** (Spring Boot 4에서 서킷 Actuator 연동용).
+- `docker` 프로필 컨테이너는 **`application-docker.yaml`** 로 `SERVER_PORT`·바인드 주소가 맞는지 확인(Compose 예제와 동기화).
+
+**4. 호출 예시 (HTTP 코드까지 보기)**
+
+```bash
+curl -s -w "\nHTTP:%{http_code}\n" http://localhost:8080/actuator/circuitbreakers
+curl -s -w "\nHTTP:%{http_code}\n" http://localhost:8080/actuator/circuitbreakerevents
+```
+
+**5. 기대하는 “의미 있는” 본문 예시**
+
+- **`/actuator/circuitbreakers`**: 최소한 **`paymentService`** 키와 **`state`**(예: `CLOSED`), 실패율·버퍼 관련 필드가 보이면 성공입니다.
+- **`/actuator/circuitbreakerevents`**: 처음에는 **`circuitBreakerEvents": []`** 일 수 있습니다. **6.3처럼 Payment 장애를 유발**하거나 주문 생성으로 Payment를 여러 번 호출한 뒤 다시 조회하면 이벤트가 쌓일 수 있습니다.
+
+---
+
 #### `/actuator/circuitbreakers`
 
 - **역할:** Resilience4j에 등록된 **서킷 브레이커 인스턴스별 현재 상태**를 JSON으로 돌려줍니다.
