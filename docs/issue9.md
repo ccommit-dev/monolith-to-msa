@@ -331,7 +331,7 @@ CREATE INDEX idx_payments_status ON payments(status);
 
 `order-service/Dockerfile`
 ```dockerfile
-FROM gradle:8.5-jdk17 AS build
+FROM gradle:8.14-jdk17 AS build
 WORKDIR /app
 COPY build.gradle settings.gradle ./
 COPY src ./src
@@ -349,7 +349,7 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
 `payment-service/Dockerfile`
 ```dockerfile
-FROM gradle:8.5-jdk17 AS build
+FROM gradle:8.14-jdk17 AS build
 WORKDIR /app
 COPY build.gradle settings.gradle ./
 COPY src ./src
@@ -371,8 +371,6 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 루트 `docker-compose-msa.yml`:
 
 ```yaml
-version: '3.8'
-
 services:
   order-service:
     build:
@@ -406,26 +404,49 @@ networks:
     driver: bridge
 ```
 
+> 저장소 루트의 `docker-compose-msa.yml`은 위와 동일한 구조이며, 필요 시 `deploy.resources` 등이 추가돼 있을 수 있다. Compose v2에서는 `version:` 키는 생략해도 된다.
+
 ---
 
 ## 5) 실행 순서
 
+**전제:** 터미널 작업 디렉터리는 **`docker-compose-msa.yml`이 있는 저장소 루트** (예: 클론한 `monolith-to-msa` 폴더). Mac/Linux 예시는 `cd` 경로만 본인 환경에 맞게 바꾼다.
+
 ### 5-1. Docker Compose 실행 (권장)
 
 ```bash
-cd /Users/junshock5/Desktop/fastcampus/temp
+cd /path/to/monolith-to-msa
 docker compose -f docker-compose-msa.yml up -d --build
+```
+
+**포트 충돌:** `Bind for 0.0.0.0:8081 failed: port is already allocated` 가 나오면 기존에 8080/8081을 쓰는 컨테이너나 프로세스를 먼저 중지한다.
+
+```bash
+docker ps
+docker stop <컨테이너이름 또는 ID>
 ```
 
 ### 5-2. 상태 확인
 
 ```bash
 docker compose -f docker-compose-msa.yml ps
+```
+
+헬스(로컬에서 컨테이너 포트로 접근):
+
+```bash
 curl http://localhost:8080/actuator/health
 curl http://localhost:8081/actuator/health
 ```
 
+- **Windows PowerShell:** `curl`은 `Invoke-WebRequest` 별칭일 수 있으므로 **`curl.exe`** 를 쓴다.
+- 응답이 `{"status":"UP"}` 이거나 집계 헬스면 정상에 가깝다. (일부 환경에서는 `DOWN` 집계가 나와도 비즈니스 API는 동작할 수 있음.)
+
 ### 5-3. 주문 생성 테스트
+
+`POST /api/orders` 는 주문 저장 후 **payment-service** 로 결제 REST 를 호출하고, 성공 시 주문 상태가 **CONFIRMED** 로 내려온다.
+
+**맥 / Linux / Git Bash (여러 줄):**
 
 ```bash
 curl -X POST http://localhost:8080/api/orders \
@@ -436,6 +457,29 @@ curl -X POST http://localhost:8080/api/orders \
     "quantity": 1,
     "totalPrice": 15000
   }'
+```
+
+**한 줄 JSON (공통):**
+
+```bash
+curl.exe -X POST http://localhost:8080/api/orders \
+  -H "Content-Type: application/json" \
+  -d "{\"customerId\":\"C100\",\"productId\":\"P100\",\"quantity\":1,\"totalPrice\":15000}"
+```
+
+**Windows PowerShell (권장):**
+
+```powershell
+$body = '{"customerId":"C100","productId":"P100","quantity":1,"totalPrice":15000}'
+Invoke-RestMethod -Uri http://localhost:8080/api/orders -Method Post -ContentType "application/json" -Body $body
+```
+
+**JSON 파일로 전송 (저장소에 샘플 포함):**
+
+```bash
+curl.exe -X POST http://localhost:8080/api/orders \
+  -H "Content-Type: application/json" \
+  --data-binary "@docs/order-create-payload.json"
 ```
 
 ### 5-4. 종료
