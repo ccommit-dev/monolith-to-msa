@@ -5,11 +5,13 @@ import com.ccommit.monolith_to_msa.dto.payment.PaymentResponse;
 import com.ccommit.monolith_to_msa.service.payment.PaymentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@Profile("payment")
 @RequestMapping("/api/payments")
 @RequiredArgsConstructor
 public class PaymentController {

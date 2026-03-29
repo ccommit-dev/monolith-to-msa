@@ -1,8 +1,13 @@
 package com.ccommit.monolith_to_msa.service.order;
 
+import com.ccommit.monolith_to_msa.client.PaymentClient;
 import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.order.OrderStatus;
+import com.ccommit.monolith_to_msa.domain.payment.PaymentMethod;
+import com.ccommit.monolith_to_msa.domain.payment.PaymentStatus;
 import com.ccommit.monolith_to_msa.domain.product.Product;
+import com.ccommit.monolith_to_msa.dto.payment.PaymentCreateRequest;
+import com.ccommit.monolith_to_msa.dto.payment.PaymentResponse;
 import com.ccommit.monolith_to_msa.dto.order.OrderCreateRequest;
 import com.ccommit.monolith_to_msa.dto.order.OrderResponse;
 import com.ccommit.monolith_to_msa.exception.InsufficientStockException;
@@ -10,6 +15,7 @@ import com.ccommit.monolith_to_msa.exception.ProductNotFoundException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.product.ProductRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,12 +27,14 @@ import java.util.stream.Collectors;
  * Repository 인터페이스에 의존 (DIP 적용)
  */
 @Service
+@Profile("order")
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
+    private final PaymentClient paymentClient;
 
     @Override
     @Transactional
@@ -58,6 +66,18 @@ public class OrderServiceImpl implements OrderService {
 
         // 5. 주문 저장
         Order savedOrder = orderRepository.save(order);
+
+        // 6. Payment Service 호출
+        PaymentCreateRequest paymentCreateRequest = new PaymentCreateRequest();
+        paymentCreateRequest.setOrderId(savedOrder.getId());
+        paymentCreateRequest.setAmount(savedOrder.getTotalPrice());
+        paymentCreateRequest.setMethod(PaymentMethod.CREDIT_CARD);
+        PaymentResponse paymentResponse = paymentClient.processPayment(paymentCreateRequest);
+
+        // 7. 결제 완료 시 주문 상태 확정
+        if (paymentResponse.getStatus() == PaymentStatus.COMPLETED) {
+            savedOrder.updateStatus(OrderStatus.CONFIRMED);
+        }
 
         return OrderResponse.from(savedOrder);
     }

@@ -6,6 +6,7 @@ import com.ccommit.monolith_to_msa.dto.order.OrderResponse;
 import com.ccommit.monolith_to_msa.service.order.OrderService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,6 +18,7 @@ import java.util.List;
  * Service 인터페이스에 의존 (DIP 적용)
  */
 @RestController
+@Profile("order")
 @RequestMapping("/api/orders")
 @RequiredArgsConstructor
 public class OrderController {

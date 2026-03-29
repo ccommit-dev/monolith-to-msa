@@ -69,3 +69,14 @@ tasks.named('test') {
 tasks.named('compileJava') {
 	options.annotationProcessorPath = configurations.annotationProcessor
 }
+
+// plain.jar 생성 비활성화 (실행 가능한 JAR만 생성)
+jar {
+	enabled = false
+}
+
+// bootJar만 활성화 (실행 가능한 JAR)
+bootJar {
+	enabled = true
+	archiveClassifier = '' // classifier 제거하여 기본 이름 사용
+}

@@ -1,0 +1,99 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+
+title Ch06.09 - 실습 단계 1~2: 분리 아키텍처
+left to right direction
+
+actor Client
+
+rectangle "Order Service (8080)" as order_service {
+  component "OrderController" as order_controller
+  component "OrderService" as order_app_service
+  database "Order DB\n(orderdb)" as order_db
+}
+
+rectangle "Payment Service (8081)" as payment_service {
+  component "PaymentController" as payment_controller
+  component "PaymentService" as payment_app_service
+  database "Payment DB\n(paymentdb)" as payment_db
+}
+
+Client --> order_controller : POST /api/orders
+order_controller --> order_app_service
+order_app_service --> order_db
+
+order_app_service ..> payment_controller : HTTP POST /api/payments
+payment_controller --> payment_app_service
+payment_app_service --> payment_db
+
+note bottom
+  - 서비스별 독립 프로젝트/포트/DB
+  - 결제 서비스는 order_id만 사용 (직접 FK 참조 없음)
+end note
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+
+title Ch06.09 - 실습 단계 3: 주문/결제 시퀀스
+
+actor Client
+participant "OrderController" as OC
+participant "OrderService" as OS
+database "Order DB" as ODB
+participant "PaymentClient" as PC
+participant "PaymentController" as PayC
+participant "PaymentService" as PayS
+database "Payment DB" as PDB
+
+Client -> OC : POST /api/orders
+OC -> OS : createOrder(request)
+OS -> ODB : save(order:PENDING)
+ODB --> OS : orderId
+
+OS -> PC : processPayment(orderId, amount)
+PC -> PayC : POST /api/payments
+PayC -> PayS : processPayment(request)
+PayS -> PDB : save(payment:PENDING)
+PayS -> PDB : update(COMPLETED, transactionId)
+PDB --> PayS : PaymentResponse
+PayS --> PayC
+PayC --> PC
+PC --> OS : PaymentResponse(COMPLETED)
+
+OS -> ODB : update(order:CONFIRMED)
+OS --> OC : OrderResponse
+OC --> Client : 201 Created
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+
+title Ch06.09 - 실습 단계 4~5: Docker 배포/실행
+left to right direction
+
+node "docker compose\n(docker-compose-msa.yml)" as compose {
+  node "order-service container\n:8080" as order_container
+  node "payment-service container\n:8081" as payment_container
+}
+
+database "orderdb (H2 mem)" as orderdb
+database "paymentdb (H2 mem)" as paymentdb
+
+order_container --> payment_container : PAYMENT_SERVICE_URL
+order_container --> orderdb
+payment_container --> paymentdb
+
+note bottom
+  실행 순서:
+  1) docker compose up -d --build
+  2) health check (8080/8081)
+  3) POST /api/orders 통합 테스트
+end note
+@enduml

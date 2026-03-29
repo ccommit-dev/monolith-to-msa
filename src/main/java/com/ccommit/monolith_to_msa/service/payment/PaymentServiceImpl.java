@@ -1,17 +1,16 @@
 package com.ccommit.monolith_to_msa.service.payment;
 
-import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.payment.Payment;
 import com.ccommit.monolith_to_msa.domain.payment.PaymentStatus;
 import com.ccommit.monolith_to_msa.dto.payment.PaymentCreateRequest;
 import com.ccommit.monolith_to_msa.dto.payment.PaymentResponse;
 import com.ccommit.monolith_to_msa.exception.OrderException;
-import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.payment.PaymentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,13 +19,13 @@ import org.springframework.transaction.annotation.Transactional;
  * 트랜잭션 관리 및 재시도 로직 포함
  */
 @Service
+@Profile("payment")
 @RequiredArgsConstructor
 @Slf4j
 @Transactional(readOnly = true)
 public class PaymentServiceImpl implements PaymentService {
     
     private final PaymentRepository paymentRepository;
-    private final OrderRepository orderRepository;
     private final PaymentGatewayService paymentGatewayService;
     
     @Override
@@ -39,12 +38,8 @@ public class PaymentServiceImpl implements PaymentService {
     public PaymentResponse processPayment(PaymentCreateRequest request) {
         log.info("결제 처리 시작: 주문ID={}, 금액={}", request.getOrderId(), request.getAmount());
         
-        // 1. 주문 조회
-        Order order = orderRepository.findById(request.getOrderId())
-                .orElseThrow(() -> new OrderException("주문을 찾을 수 없습니다: " + request.getOrderId()));
-        
-        // 2. 결제 엔티티 생성 (PENDING 상태) - 별도 트랜잭션으로 저장
-        Payment savedPayment = savePaymentEntity(order, request);
+        // 1. 결제 엔티티 생성 (PENDING 상태) - 별도 트랜잭션으로 저장
+        Payment savedPayment = savePaymentEntity(request);
         log.info("결제 엔티티 생성: 결제ID={}, 상태={}", savedPayment.getId(), savedPayment.getStatus());
         
         try {
@@ -74,9 +69,9 @@ public class PaymentServiceImpl implements PaymentService {
      * 결제 엔티티 저장 (별도 트랜잭션으로 저장하여 롤백 방지)
      */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
-    public Payment savePaymentEntity(Order order, PaymentCreateRequest request) {
+    public Payment savePaymentEntity(PaymentCreateRequest request) {
         Payment payment = Payment.builder()
-                .order(order)
+                .orderId(request.getOrderId())
                 .amount(request.getAmount())
                 .method(request.getMethod())
                 .status(PaymentStatus.PENDING)

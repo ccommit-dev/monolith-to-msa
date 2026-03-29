@@ -1,0 +1,53 @@
+services:
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=default
+      - SPRING_DATASOURCE_URL=jdbc:h2:mem:orderdb
+      - PAYMENT_SERVICE_URL=http://payment-service:8081
+    networks:
+      - msa-network
+    depends_on:
+      - payment-service
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=default
+      - SPRING_DATASOURCE_URL=jdbc:h2:mem:paymentdb
+    networks:
+      - msa-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+networks:
+  msa-network:
+    driver: bridge
+
+# 사용법 (Docker Compose v2):
+# 1. 기본 실행: docker compose -f docker-compose-msa.yml up -d
+# 2. 주문 서비스만 확장: docker compose -f docker-compose-msa.yml up -d --scale order-service=3
+# 3. 로그 확인: docker compose -f docker-compose-msa.yml logs -f order-service
+# 4. 중지: docker compose -f docker-compose-msa.yml down
+
