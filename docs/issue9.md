@@ -95,6 +95,14 @@ public class OrderServiceApplication {
 - `domain/OrderStatus.java`
 - `repository/OrderRepository.java`
 
+**주요 파일 설명 (모놀리식 대비 포인트)**
+
+| 파일 | 역할·변경 포인트 |
+|------|------------------|
+| `Order.java` | 주문 애그리거트. `customerId`, `productId`, `quantity`, `totalPrice`, `status` 및 타임스탬프만 보유. **Payment 엔티티·`@ManyToOne` 없음** — 결제는 별도 서비스 DB이므로 주문 쪽에서 결제 FK를 두지 않는다. `@PrePersist`/`@PreUpdate`로 생성·수정 시각을 채우고, `confirm()`으로 결제 성공 후 `CONFIRMED` 전이. |
+| `OrderStatus.java` | 주문 상태 열거형. 실습 기준 `PENDING`(생성 직후) → `CONFIRMED`(원격 결제 완료 반영) → `CANCELLED`(취소). 필요 시 배송 등 단계를 추가해 확장한다. |
+| `OrderRepository.java` | `JpaRepository<Order, Long>` 상속만 두어도 충분한 경우가 많다. 조회·필터 API를 늘리면 `findBy...` 메서드명 규칙 또는 `@Query`로 확장한다. |
+
 ### 1-4. DTO
 
 추가 파일:
@@ -257,6 +265,17 @@ public class PaymentServiceApplication {
 - `Payment`는 `orderId`만 보유
 - Order 엔티티 직접 참조 없음
 
+**주요 파일 설명**
+
+| 파일 | 역할·변경 포인트 |
+|------|------------------|
+| `Payment.java` | 결제 애그리거트. **`Long orderId` 컬럼만** 두고 Order JPA 연관은 두지 않는다(타 서비스 식별자 참조). `amount`, `method`, `status`, `transactionId`, `paidAt`, 타임스탬프. `complete(transactionId)`에서 `COMPLETED`·`paidAt`·거래 ID 반영. |
+| `PaymentStatus.java` | `PENDING` → `COMPLETED` 등 상태 열거. 실습 구현에 맞게 `FAILED` 등을 추가할 수 있다. |
+| `PaymentMethod.java` | `CREDIT_CARD` 등 결제 수단. API JSON과 매핑되도록 enum 이름을 맞춘다. |
+| `PaymentRepository.java` | `JpaRepository<Payment, Long>`. `orderId`·`status` 조회가 필요하면 `findByOrderId` 등으로 확장. |
+| `PaymentCreateRequest.java` | Order 서비스가 넘기는 본문과 동일 스키마: `orderId`, `amount`, `method` + Bean Validation. |
+| `PaymentResponse.java` | 클라이언트·Order 서비스가 역직렬화하는 응답 DTO. `from(Payment)` 정적 팩토리로 엔티티 → API 모델 변환. |
+
 ### 2-4. Service/Controller/Exception
 
 추가 파일:
@@ -266,10 +285,20 @@ public class PaymentServiceApplication {
 - `exception/PaymentNotFoundException.java`
 - `exception/GlobalExceptionHandler.java`
 
+**주요 파일 설명**
+
+| 파일 | 역할·변경 포인트 |
+|------|------------------|
+| `PaymentService.java` | `processPayment`, `getPayment` 등 유스케이스 인터페이스. 구현체는 트랜잭션·검증 정책을 담는다. |
+| `PaymentServiceImpl.java` | `processPayment`: `PENDING`으로 빌드·저장 후 **`complete("TXN-" + UUID)`** 로 즉시 완료 처리(실습용 PG Mock). 영속 엔티티에 `complete` 호출 후 트랜잭션 커밋 시 DB 반영. `getPayment`: ID 조회 후 DTO 변환. |
+| `PaymentController.java` | `POST /api/payments` → **201 CREATED**, `GET /api/payments/{id}` → 200. Order 서비스의 `RestTemplate`/`PaymentClient` 호출 URL과 경로가 일치해야 한다. |
+| `PaymentNotFoundException.java` | 조회 실패 시 도메인 예외. |
+| `GlobalExceptionHandler.java` | `@RestControllerAdvice`로 위 예외를 HTTP 상태·본문으로 매핑. API 오류 형식을 Order 쪽과 맞출지 팀 규약으로 정한다. |
+
 핵심 로직(`PaymentServiceImpl`):
-1. 결제 `PENDING` 저장
-2. 트랜잭션 ID 생성
-3. 결제 상태 `COMPLETED` 변경 후 응답
+1. 요청으로 `Payment`를 `PENDING`으로 만들어 저장한다.
+2. `complete(...)`로 **거래 ID**(예: `TXN-` + UUID)와 **`COMPLETED`**·`paidAt`을 설정한다.
+3. `PaymentResponse.from`으로 응답을 만든다(HTTP 201은 Controller에서 지정).
 
 ### 2-5. 설정/마이그레이션
 
@@ -329,6 +358,13 @@ CREATE INDEX idx_payments_status ON payments(status);
 
 ## 3) Docker 파일 추가
 
+**주요 추가·변경 파일:** 서비스별로 루트에 두 개의 `Dockerfile`만 두면 된다(호스트에 JDK/Gradle 없이 이미지 안에서 빌드).
+
+| 경로 | 한 줄 요약 |
+|------|------------|
+| `order-service/Dockerfile` | Order 전용 이미지: 멀티 스테이지 빌드 → JRE 실행, 8080, 결제 URL은 Compose 서비스명 기준. |
+| `payment-service/Dockerfile` | Payment 전용 이미지: 동일 패턴, 8081, 원격 Order 호출 없음. |
+
 `order-service/Dockerfile`
 ```dockerfile
 FROM gradle:8.14-jdk17 AS build
@@ -364,9 +400,24 @@ ENV SPRING_DATASOURCE_URL=jdbc:h2:mem:paymentdb
 ENTRYPOINT ["java", "-jar", "app.jar"]
 ```
 
+**주요 지시어 설명 (두 Dockerfile 공통)**
+
+| 구간/지시어 | 설명 |
+|-------------|------|
+| `FROM gradle:8.14-jdk17 AS build` | Spring Boot Gradle 플러그인이 요구하는 **Gradle 8.14+** 이미지. `8.5` 등 낮은 버전이면 빌드 단계에서 플러그인 적용 실패할 수 있다. |
+| `COPY build.gradle settings.gradle` → `COPY src` | Gradle 메타데이터 먼저 복사 후 소스 복사(의존성 캐시·레이어 재사용). |
+| `RUN gradle clean bootJar -x test` | 컨테이너 안에서 실행 가능한 fat JAR 생성. `-x test`는 실습 빌드 시간 단축용. |
+| `FROM eclipse-temurin:17-jre` | JDK 없이 JRE만 있는 런타임 이미지로 용량·공격 면적 감소. |
+| `COPY --from=build ... *-SNAPSHOT.jar` | 빌드 스테이지 산출물만 최종 이미지로 복사. |
+| `ENV SPRING_DATASOURCE_URL` | 컨테이너마다 H2 in-memory DB URL을 고정(주문/결제 DB 분리). |
+| `ENV PAYMENT_SERVICE_URL` (order만) | **호스트명 `payment-service`** — Compose 기본 네트워크에서 서비스 이름이 DNS로 해석된다. |
+| `EXPOSE` | 문서·도구용; 실제 포트 개방은 Compose `ports`가 담당. |
+
 ---
 
 ## 4) docker-compose-msa.yml
+
+**주요 추가·변경 파일:** 저장소 루트의 `docker-compose-msa.yml` 한 개로 두 서비스의 빌드·포트·환경·네트워크를 묶는다.
 
 루트 `docker-compose-msa.yml`:
 
@@ -403,6 +454,19 @@ networks:
   msa-network:
     driver: bridge
 ```
+
+**주요 키 설명**
+
+| 키/블록 | 설명 |
+|---------|------|
+| `services.order-service.build.context` | `./order-service` — 해당 디렉터리가 빌드 컨텍스트이며, 그 안의 `Dockerfile`이 `COPY` 경로 기준이 된다. |
+| `services.order-service.build.dockerfile` | 생략 시 기본 `Dockerfile`. 명시하면 의도가 분명해진다. |
+| `services.payment-service.build` | `context: ./payment-service` + `dockerfile: Dockerfile` — 결제 서비스 이미지 전용 빌드. |
+| `ports: "8080:8080"` / `"8081:8081"` | 호스트에서 각각 Order·Payment 애플리케이션 포트로 접속. |
+| `environment` | 컨테이너 프로세스 환경 변수. Spring은 `SPRING_DATASOURCE_URL`, `PAYMENT_SERVICE_URL` 등을 설정으로 매핑한다(`application.yaml`보다 우선). |
+| `depends_on` | 컨테이너 **시작 순서**만 조정한다. **payment가 준비 완료될 때까지 기다리지는 않는다**(헬스 기반 `condition` 없으면). |
+| `networks` + `driver: bridge` | 사용자 정의 네트워크에 올린 컨테이너끼리 **서비스 이름(`order-service`, `payment-service`)으로 통신**할 수 있다. |
+| `payment-service` | Order를 HTTP로 부르지 않으므로 `PAYMENT_SERVICE_URL`은 없다. 두 서비스 모두 같은 `msa-network`에 있어야 order → payment 이름 해석이 된다. |
 
 > 저장소 루트의 `docker-compose-msa.yml`은 위와 동일한 구조이며, 필요 시 `deploy.resources` 등이 추가돼 있을 수 있다. Compose v2에서는 `version:` 키는 생략해도 된다.
 
