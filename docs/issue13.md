@@ -1,389 +1,304 @@
 # Ch07.01: AI 트래픽 데이터 수집
 
 ## 실습 목표
-- 핵심 메트릭 수집 (TPS, Latency, Error Rate, Resource)
-- 데이터 파이프라인 구축 (수집 → 저장 → 처리 → 시각화)
-- AI 기반 이상 탐지 구현
-- Grafana 대시보드를 통한 인사이트 시각화
+
+- HTTP 트래픽에서 **TPS·지연·에러율·리소스(추정)** 를 주기적으로 집계해 DB에 저장한다.
+- **Z-score·임계값** 기반으로 저장된 집계 행에 이상치 플래그를 붙인다.
+- **Prometheus / Grafana**로 앱 메트릭과 커스텀 트래픽 메트릭을 스크랩·시각화한다.
 
 ---
 
-## 핵심 메트릭
+## 실습 순서 한눈에 보기
 
-### 1. TPS (Transactions Per Second)
-- **정의**: 초당 처리되는 트랜잭션 수
-- **수집 방법**: 시간 윈도우 내 요청 수 / 시간
-- **용도**: 시스템 처리량 측정, 부하 모니터링
+| 순서 | 단계 | 하는 일 | 산출/확인 |
+|------|------|---------|-----------|
+| 0 | 사전 준비 | JDK, Redis(권장), Docker(모니터링용) | 환경 OK |
+| 1 | 앱 기동 | 단일 프로세스 `bootRun` | `8080`, `traffic_metrics` 테이블 |
+| 2 | 트래픽 발생 | API 호출 또는 Locust | 인터셉터 → 1분마다 DB 적재 |
+| 3 | 메트릭 API 확인 | `curl` 등으로 JSON/Prometheus 텍스트 | `/api/metrics/*` |
+| 4 | Prometheus·Grafana | `docker compose` 기동 | `:9090`, `:3000` |
+| 5 | 이상 탐지·부하 | 학습 대기 후 Locust 등 | `/api/metrics/anomalies`, Prometheus `traffic_anomaly_score` |
 
-### 2. Latency (응답 시간)
-- **정의**: 요청 처리에 걸리는 시간
-- **수집 방법**: 평균, P95, P99 응답 시간
-- **용도**: 성능 모니터링, 사용자 경험 측정
+**작업 디렉터리**
 
-### 3. Error Rate (에러율)
-- **정의**: 전체 요청 중 에러 발생 비율
-- **수집 방법**: 에러 수 / 전체 요청 수 * 100
-- **용도**: 시스템 안정성 측정, 장애 감지
-
-### 4. Resource (리소스 사용률)
-- **정의**: CPU, Memory, Connection Pool 사용률
-- **수집 방법**: 시스템 메트릭 수집
-- **용도**: 리소스 모니터링, 확장성 판단
+| 작업 | 디렉터리 |
+|------|----------|
+| `gradlew` / `gradlew.bat` | 저장소 루트 |
+| `docker compose -f docker-compose-monitoring.yml` | 저장소 루트 |
+| Locust | `locust/` |
 
 ---
 
-## 데이터 파이프라인
+## 0단계: 사전 준비
 
-### 파이프라인 구조
-
-```
-수집 → 저장 → 처리 → 시각화
-```
-
-#### 1. 수집 (Collection)
-- **구현**: `MetricInterceptor` + `MetricCollectorService`
-- **방법**: HTTP 요청 인터셉터를 통한 실시간 메트릭 수집
-- **주기**: 실시간 수집, 1분마다 집계
-
-#### 2. 저장 (Storage)
-- **구현**: `TrafficMetricRepository` + H2 Database
-- **방법**: JPA를 통한 메트릭 데이터 영구 저장
-- **형식**: `TrafficMetric` 엔티티
-
-#### 3. 처리 (Processing)
-- **구현**: `AnomalyDetectionService`
-- **방법**: AI 기반 이상 탐지 (Z-score 기반)
-- **주기**: 1분마다 이상 탐지 수행
-
-#### 4. 시각화 (Visualization)
-- **구현**: Grafana + Prometheus
-- **방법**: Prometheus 메트릭 수집, Grafana 대시보드
-- **형식**: 실시간 대시보드, 알림 설정
+1. **JDK 17+** — `java -version`
+2. **Redis** — 이 프로젝트는 기본 프로필에서도 Redis 연결을 기대하는 구성이 있을 수 있으므로 **localhost:6379** 기동을 권장합니다 (`issue12.md` 0단계 참고).
+3. **Docker** — 4단계(Prometheus/Grafana)만 필요합니다. 없으면 1~3단계와 REST 조회만으로도 수집·이상 탐지 흐름은 실습 가능합니다.
+4. **(선택) Locust** — `locust/`에서 `pip install -r requirements.txt` 후 `python -m locust ...` 사용.
 
 ---
 
-## AI 이상 탐지
+## 1단계: 애플리케이션 기동
 
-### 이상 탐지 알고리즘
+### 1.1 명령어
 
-#### 1. 정상 패턴 학습
-- **기간**: 최근 1시간 데이터
-- **통계**: 평균, 표준편차 계산
-- **주기**: 1시간마다 재학습
+**Linux / macOS** (저장소 루트)
 
-#### 2. 이상치 감지 (Z-score 기반)
-- **TPS 이상치**: Z-score > 2.0
-- **Latency 이상치**: Z-score > 2.0
-- **Error Rate 이상치**: 평균 + 2*표준편차 초과
-- **Resource 이상치**: CPU > 80%, Memory > 85%
-
-#### 3. 이상치 점수 계산
-- **점수 범위**: 0.0 ~ 1.0
-- **임계값**: 0.5 이상 시 이상치로 판단
-- **가중치**:
-  - TPS 이상: 0.3
-  - Latency 이상: 0.3
-  - Error Rate 이상: 0.2
-  - Resource 이상: 0.1 (CPU/Memory 각각)
-
----
-
-## 인사이트 대시보드
-
-### Grafana 대시보드 구성
-
-#### 1. TPS 대시보드
-- **패널**: TPS 그래프 (엔드포인트별)
-- **메트릭**: `traffic_tps{endpoint="..."}`
-- **용도**: 처리량 모니터링
-
-#### 2. Latency 대시보드
-- **패널**: 평균 응답 시간 그래프
-- **메트릭**: `traffic_latency_avg{endpoint="..."}`
-- **용도**: 성능 모니터링
-
-#### 3. Error Rate 대시보드
-- **패널**: 에러율 그래프
-- **메트릭**: `traffic_error_rate{endpoint="..."}`
-- **용도**: 안정성 모니터링
-
-#### 4. 이상 탐지 대시보드
-- **패널**: 이상치 점수 테이블
-- **메트릭**: `traffic_anomaly_score{endpoint="..."}`
-- **용도**: 이상치 감지 및 알림
-
----
-
-## 실습 순서
-
-### 1단계: 메트릭 수집 설정
-
-#### 1.1 데이터베이스 마이그레이션
-```bash
-# 애플리케이션 실행 시 자동으로 테이블 생성
-# V2__create_traffic_metrics_table.sql 실행
-```
-
-#### 1.2 인터셉터 등록 확인
-- `WebConfig`에 `MetricInterceptor` 등록 확인
-- `/api/**` 경로에 인터셉터 적용
-
-#### 1.3 스케줄링 활성화
-- `MetricsConfig`에서 `@EnableScheduling` 확인
-
----
-
-### 2단계: 메트릭 수집 테스트
-
-#### 2.1 애플리케이션 실행
 ```bash
 ./gradlew bootRun
 ```
 
-#### 2.2 API 요청 생성
+**Windows — PowerShell** (저장소 루트)
+
+```powershell
+.\gradlew.bat bootRun
+```
+
+### 1.2 이 단계에서 일어나는 일 (코드 기준)
+
+| 구성요소 | 파일 | 역할 |
+|----------|------|------|
+| 스케줄링 | `config/MetricsConfig.java` | `@EnableScheduling` — 분 단위 집계·이상 탐지 스케줄 활성화 |
+| 인터셉터 등록 | `config/WebConfig.java` | `/api/**`에 `MetricInterceptor` 등록 (메트릭 API 경로는 인터셉터에서 **제외**하여 Prometheus 스크랩이 원본 트래픽을 오염시키지 않음) |
+| DB 스키마 | `domain/metrics/TrafficMetric.java` | JPA가 H2에 `traffic_metrics` 테이블 생성 (`ddl-auto: create-drop` 등 기존 설정 따름) |
+
+> **참고:** `src/main/resources/db/migration/V4__create_traffic_metrics_table.sql` 은 **Flyway 도입 시** 참고·적용용입니다. 현재 `build.gradle`에는 Flyway 플러그인이 없으며, 기본 실습은 **엔티티 기준 자동 DDL**로 동작합니다.
+
+### 1.3 기동 확인
+
+```text
+http://localhost:8080/actuator/health
+```
+
+---
+
+## 2단계: 트래픽 발생 — 수집·저장 파이프라인 이해
+
+### 2.1 흐름 (요청 한 건부터 DB까지)
+
+1. **`MetricInterceptor`** (`interceptor/MetricInterceptor.java`)  
+   - `preHandle`: 요청 시각 저장  
+   - `afterCompletion`: `/api/` 요청만 처리, **응답 시간(ms)**·**성공 여부(HTTP 200~399)** 기록  
+   - `MetricCollectorService.recordRequest(endpoint, responseTime, success)` 호출 → 엔드포인트별 **메모리 버퍼**(`MetricWindow`)에 누적  
+
+2. **`MetricCollectorService`** (`service/metrics/MetricCollectorService.java`)  
+   - `@Scheduled(fixedRate = 60000)`: **1분마다** 버퍼를 집계해 `TrafficMetric` 엔티티로 만들고 `TrafficMetricRepository.save`  
+   - TPS·평균/p95/p99 지연·에러율·요청/에러 건수·CPU(랜덤 추정)·힙 메모리 사용률·커넥션 풀(랜덤 추정) 포함  
+   - 저장 후 해당 엔드포인트 버퍼 **리셋**  
+
+3. **이상 탐지는 이 단계에서는 아님** — 집계 행은 처음에 `isAnomaly=false` 로 저장되고, `AnomalyDetectionService`가 이후 DB 행을 갱신합니다.
+
+### 2.2 수동으로 트래픽 만들기 (예시)
+
+**Linux / macOS**
+
 ```bash
-# 주문 생성 요청
-curl -X POST http://localhost:8080/api/orders \
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/products/product-001
+
+curl -s -X POST http://localhost:8080/api/orders \
   -H "Content-Type: application/json" \
-  -d '{
-    "customerId": "customer-001",
-    "productId": "product-001",
-    "quantity": 1,
-    "totalPrice": 10000,
-    "paymentMethod": "CREDIT_CARD"
-  }'
-
-# 상품 조회 요청
-curl http://localhost:8080/api/products/product-001
+  -d "{\"customerId\":\"customer-001\",\"productId\":\"product-001\",\"quantity\":1,\"totalPrice\":10000,\"paymentMethod\":\"CREDIT_CARD\"}"
 ```
 
-#### 2.3 메트릭 조회
-```bash
-# 최근 1시간 메트릭 조회
-curl http://localhost:8080/api/metrics/traffic
+**Windows PowerShell**
 
-# 이상치 메트릭 조회
-curl http://localhost:8080/api/metrics/anomalies
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/api/products/product-001" -Method Get
 
-# 파이프라인 상태 조회
-curl http://localhost:8080/api/metrics/pipeline/status
+$body = @{
+  customerId = "customer-001"
+  productId  = "product-001"
+  quantity   = 1
+  totalPrice = 10000
+  paymentMethod = "CREDIT_CARD"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8080/api/orders" -Method Post -Body $body -ContentType "application/json"
 ```
+
+**중요:** 집계는 **1분 주기**입니다. API를 호출한 뒤 **최소 1분 이상** 지난 뒤 3단계 조회를 하면 `traffic_metrics`에 행이 쌓인 것을 볼 수 있습니다.
 
 ---
 
-### 3단계: Prometheus 설정
+## 3단계: 메트릭 조회 API
 
-#### 3.1 Prometheus 실행
+기본값으로 최근 구간을 조회합니다. 파라미터 `start`, `end`는 `ISO-8601` (`2026-03-31T12:00:00`).
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/api/metrics/traffic` | 시간 범위·엔드포인트 필터로 `TrafficMetric` 목록 |
+| GET | `/api/metrics/anomalies` | `isAnomaly == true` 인 행 (이상 탐지 실행 후) |
+| GET | `/api/metrics/pipeline/status` | 최근 1시간 행 수·이상 건수 등 (`DataPipelineService`) |
+| GET | `/api/metrics/pipeline/statistics` | 최근 24시간 평균 TPS·지연·에러율 등 |
+| GET | `/api/metrics/prometheus` | Prometheus **텍스트 포맷** (최근 1분 집계 행 기준) |
+
+**예시**
+
 ```bash
-# Docker Compose로 실행
-docker compose -f docker-compose-monitoring.yml up -d prometheus
-
-# Prometheus 접속
-# http://localhost:9090
+curl -s "http://localhost:8080/api/metrics/traffic" | head -c 500
+curl -s "http://localhost:8080/api/metrics/pipeline/status"
+curl -s "http://localhost:8080/api/metrics/prometheus"
 ```
 
-#### 3.2 메트릭 수집 확인
-- Prometheus UI에서 `traffic_tps` 메트릭 확인
-- `traffic_latency_avg` 메트릭 확인
-- `traffic_error_rate` 메트릭 확인
+**Windows PowerShell**
+
+```powershell
+Invoke-RestMethod "http://localhost:8080/api/metrics/pipeline/status"
+(Invoke-WebRequest "http://localhost:8080/api/metrics/prometheus").Content
+```
+
+**Prometheus 노출 이름 (커스텀 job)**
+
+- `traffic_tps{endpoint="..."}`  — 라벨은 경로의 `/`가 `_`로 치환된 값  
+- `traffic_latency_avg{endpoint="..."}`  
+- `traffic_error_rate{endpoint="..."}`  
+- `traffic_anomaly_score{endpoint="..."}`  — 이상 점수 없으면 `0`  
 
 ---
 
-### 4단계: Grafana 설정
+## 4단계: Prometheus · Grafana (Docker)
 
-#### 4.1 Grafana 실행
+### 4.1 기동 (저장소 루트)
+
 ```bash
-# Docker Compose로 실행
-docker compose -f docker-compose-monitoring.yml up -d grafana
-
-# Grafana 접속
-# http://localhost:3000
-# ID: admin, Password: admin
+docker compose -f docker-compose-monitoring.yml up -d
 ```
 
-#### 4.2 데이터 소스 연결
-- Prometheus 데이터 소스 자동 연결 확인
-- `http://prometheus:9090` 연결 확인
+**Windows PowerShell**
 
-#### 4.3 대시보드 생성
-- Traffic Metrics Dashboard 임포트
-- 또는 수동으로 패널 생성
+```powershell
+docker compose -f docker-compose-monitoring.yml up -d
+```
+
+- Prometheus: `http://localhost:9090`  
+- Grafana: `http://localhost:3000` (기본 계정 `admin` / `admin`)  
+
+`prometheus` 서비스에 `extra_hosts: host.docker.internal:host-gateway` 가 있어 **Linux**에서도 호스트의 `8080` 스크랩이 동작하기 쉽습니다.
+
+### 4.2 스크랩 설정 (`monitoring/prometheus/prometheus.yml`)
+
+| job | metrics_path | 대상 |
+|-----|----------------|------|
+| `spring-boot-app` | `/actuator/prometheus` | Micrometer 기본 메트릭 |
+| `traffic-metrics` | `/api/metrics/prometheus` | 이 장의 커스텀 트래픽 집계 |
+
+타깃: `host.docker.internal:8080` — **호스트에서 `bootRun` 중**이어야 합니다.
+
+### 4.3 Grafana
+
+- 데이터 소스: `monitoring/grafana/provisioning/datasources/prometheus.yml` 로 **Prometheus** (`http://prometheus:9090`) 가 기본 등록됩니다.  
+- 대시보드 **자동 프로비저닝은 없습니다.** `monitoring/grafana/dashboards/traffic-metrics.json` 을 UI에서 **Import** 하거나, 패널에서 위 PromQL(`traffic_tps` 등)을 직접 지정합니다.
 
 ---
 
-### 5단계: AI 이상 탐지 테스트
+## 5단계: AI(통계) 이상 탐지 · 부하 실습
 
-#### 5.1 정상 패턴 학습 대기
-- 최소 1시간 이상 데이터 수집 필요
-- 정상 트래픽 패턴 학습
+### 5.1 동작 (`service/ai/AnomalyDetectionService.java`)
 
-#### 5.2 이상 트래픽 생성
+| 스케줄 | 내용 |
+|--------|------|
+| `learnNormalPattern` | 앱 기동 **약 90초 후** 첫 실행, 이후 **1시간마다** — 최근 1시간 집계 행으로 평균·표준편차 학습 |
+| `detectAnomalies` | **1분마다** — 최근 1분 이내 저장된 행에 대해 Z-score·에러율·CPU·메모리 임계값으로 점수 합산, **0.5 초과 시** `isAnomaly`·`anomalyScore`·`anomalyReason` 업데이트 |
+
+**실습 팁:** 정상 트래픽으로 몇 분 돌린 뒤, **Locust 병목 시나리오**로 트래픽을 키우면 TPS·지연·에러율이 벗어나 이상치로 잡히기 쉽습니다.
+
+### 5.2 부하 예시 (`locust/`)
+
+**Linux / macOS**
+
 ```bash
-# 부하 테스트로 이상 트래픽 생성
 cd locust
 source venv/bin/activate
-locust -f load_test_bottleneck.py \
-    --host=http://localhost:8080 \
-    --headless \
-    --users=200 \
-    --spawn-rate=20 \
-    --run-time=5m
+python -m locust -f load_test_bottleneck.py \
+  --host=http://localhost:8080 --headless \
+  --users=200 --spawn-rate=20 --run-time=5m
 ```
 
-#### 5.3 이상치 감지 확인
+**Windows PowerShell**
+
+```powershell
+cd locust
+python -m locust -f load_test_bottleneck.py --host=http://localhost:8080 --headless --users=200 --spawn-rate=20 --run-time=5m
+```
+
+### 5.3 확인
+
 ```bash
-# 이상치 메트릭 조회
-curl http://localhost:8080/api/metrics/anomalies
+curl -s "http://localhost:8080/api/metrics/anomalies"
+```
 
-# 이상치 점수 및 원인 확인
+이상으로 표시된 행이 Prometheus에 반영되려면, 스크랩 주기(15s) 이후 `traffic_anomaly_score` 를 확인합니다.
+
+---
+
+## 개념 정리 (참고)
+
+### 핵심 메트릭
+
+- **TPS**: 집계 윈도우(인터셉터 버퍼) 내 요청 수 ÷ 경과 초  
+- **Latency**: 동일 윈도우 내 응답 시간 평균·p95·p99  
+- **Error Rate**: HTTP 기준 실패(4xx/5xx 등 `success==false`) 비율  
+- **Resource**: 코드상 CPU·커넥션 풀은 **추정/샘플**이며, 운영 관측은 Actuator/Micrometer를 병행하는 것이 좋습니다.
+
+### 데이터 파이프라인 (구현 매핑)
+
+```
+수집(인터셉터·메모리) → 저장(1분 스케줄·JPA) → 처리(이상 탐지 스케줄·엔티티 갱신) → 시각화(Prometheus 스크랩·Grafana)
+```
+
+- 파이프라인 **상태 요약**: `service/pipeline/DataPipelineService.java`  
+- **AI** 표현은 통계적 이상 탐지(Z-score·임계값)에 해당합니다.
+
+---
+
+## 코드 구조 (패키지)
+
+```
+domain/metrics/TrafficMetric.java
+repository/metrics/TrafficMetricRepository.java
+service/metrics/MetricCollectorService.java
+service/ai/AnomalyDetectionService.java
+service/pipeline/DataPipelineService.java
+controller/metrics/TrafficMetricsController.java
+interceptor/MetricInterceptor.java
+config/MetricsConfig.java
+config/WebConfig.java
 ```
 
 ---
 
-## 코드 구조
+## 트러블슈팅
 
-### 도메인 모델
-```
-domain/metrics/
-└── TrafficMetric.java          # 트래픽 메트릭 엔티티
-```
-
-### Repository
-```
-repository/metrics/
-└── TrafficMetricRepository.java # 메트릭 Repository
-```
-
-### 서비스
-```
-service/
-├── metrics/
-│   └── MetricCollectorService.java    # 메트릭 수집 서비스
-├── ai/
-│   └── AnomalyDetectionService.java   # AI 이상 탐지 서비스
-└── pipeline/
-    └── DataPipelineService.java       # 데이터 파이프라인 서비스
-```
-
-### 컨트롤러
-```
-controller/metrics/
-└── TrafficMetricsController.java      # 메트릭 조회 API
-```
-
-### 인터셉터
-```
-interceptor/
-└── MetricInterceptor.java             # 메트릭 수집 인터셉터
-```
-
-### 설정
-```
-config/
-└── MetricsConfig.java                 # 메트릭 수집 설정
-```
+| 증상 | 점검 |
+|------|------|
+| `/api/metrics/traffic` 이 비어 있음 | 1분 스케줄 전·`/api/` 호출 부족 — 호출 후 1분 이상 대기 |
+| 이상 탐지가 안 됨 | 기동 후 **약 90초** 뒤 첫 학습 필요. 학습 시점에 DB 집계 행이 거의 없으면 `learnNormalPattern` 이 스킵될 수 있음 — 트래픽 후 재시도 |
+| Prometheus `DOWN` | 호스트에서 `8080` 기동 여부, `host.docker.internal` (Linux는 compose의 `extra_hosts` 확인) |
+| Grafana에 시계열 없음 | 스크랩 간격·대시보드 시간 범위·`traffic_*` 메트릭 존재 여부 |
 
 ---
 
-## API 엔드포인트
+## 다음 단계 (선택)
 
-### 메트릭 조회
-```
-GET /api/metrics/traffic
-  - start: 시작 시간 (ISO 8601)
-  - end: 종료 시간 (ISO 8601)
-  - endpoint: 엔드포인트 필터 (선택)
-
-GET /api/metrics/anomalies
-  - start: 시작 시간 (ISO 8601)
-  - end: 종료 시간 (ISO 8601)
-
-GET /api/metrics/pipeline/status
-  - 파이프라인 상태 조회
-
-GET /api/metrics/pipeline/statistics
-  - 파이프라인 통계 조회
-
-GET /api/metrics/prometheus
-  - Prometheus 형식 메트릭 조회
-```
-
----
-
-## 핵심 메시지
-
-### 1. 측정 가능한 것만 관리할 수 있다
-- **메트릭 수집**: 모든 성능 지표를 수집해야 함
-- **데이터 기반 의사결정**: 추측이 아닌 데이터로 판단
-- **지속적인 모니터링**: 실시간 모니터링 필수
-
-### 2. 데이터 파이프라인은 핵심 인프라
-- **수집 → 저장 → 처리 → 시각화**: 전체 파이프라인 구축
-- **확장 가능한 구조**: 대용량 데이터 처리 가능
-- **실시간 처리**: 지연 시간 최소화
-
-### 3. AI는 패턴 인식 도구
-- **정상 패턴 학습**: 과거 데이터로 정상 패턴 학습
-- **이상치 감지**: 통계적 방법으로 이상치 감지
-- **자동화**: 수동 모니터링에서 자동 감지로 전환
-
-### 4. 시각화는 인사이트 도구
-- **대시보드**: 한눈에 보는 시스템 상태
-- **알림**: 이상 상황 자동 알림
-- **트렌드 분석**: 시간에 따른 변화 추적
-
----
-
-## 다음 단계
-
-### 1. 고급 이상 탐지
-- **머신러닝 모델**: LSTM, Autoencoder 등
-- **실시간 스트리밍**: Kafka + Flink
-- **다변량 분석**: 여러 메트릭 동시 분석
-
-### 2. 예측 분석
-- **트래픽 예측**: 미래 트래픽 예측
-- **리소스 예측**: 리소스 사용량 예측
-- **장애 예측**: 장애 발생 가능성 예측
-
-### 3. 자동화
-- **자동 스케일링**: 트래픽에 따른 자동 확장
-- **자동 복구**: 장애 시 자동 복구
-- **자동 최적화**: 성능 자동 최적화
+- 실제 CPU·풀 사용률: OSHI, Hikari 메트릭 등과 연동  
+- 이상 탐지: 다변량·LSTM 등 고급 모델  
+- Grafana 대시보드 폴더 프로비저닝으로 JSON 자동 로드  
 
 ---
 
 ## 참고 자료
 
-- [Prometheus 공식 문서](https://prometheus.io/docs/)
-- [Grafana 공식 문서](https://grafana.com/docs/)
-- [Z-score 이상 탐지](https://en.wikipedia.org/wiki/Standard_score)
-- [시계열 이상 탐지](https://www.kaggle.com/code/victorambonati/anomaly-detection-time-series)
+- [Prometheus](https://prometheus.io/docs/)  
+- [Grafana](https://grafana.com/docs/)  
+- [Z-score](https://en.wikipedia.org/wiki/Standard_score)  
 
 ---
 
 ## 체크리스트
 
-### 메트릭 수집
-- [ ] 메트릭 수집 인터셉터 등록
-- [ ] 메트릭 수집 서비스 구현
-- [ ] 데이터베이스 테이블 생성
-- [ ] 메트릭 수집 테스트
-
-### 데이터 파이프라인
-- [ ] 수집 단계 구현
-- [ ] 저장 단계 구현
-- [ ] 처리 단계 구현
-- [ ] 시각화 단계 구현
-
-### AI 이상 탐지
-- [ ] 정상 패턴 학습 구현
-- [ ] 이상치 감지 알고리즘 구현
-- [ ] 이상치 점수 계산 구현
-- [ ] 이상치 감지 테스트
-
-### Grafana 대시보드
-- [ ] Prometheus 설정
-- [ ] Grafana 설정
-- [ ] 대시보드 생성
-- [ ] 알림 설정
+- [ ] Redis·JDK 준비 후 `bootRun` 성공  
+- [ ] `/api/...` 호출 후 1분 뒤 `/api/metrics/traffic` 에 행 확인  
+- [ ] `/api/metrics/pipeline/status` 로 파이프라인 요약 확인  
+- [ ] (선택) Docker 모니터링 스택 기동 후 Prometheus **Targets** UP  
+- [ ] (선택) Grafana에서 `traffic_tps` 등 쿼리  
+- [ ] 부하 후 `/api/metrics/anomalies` 또는 `traffic_anomaly_score` 확인  

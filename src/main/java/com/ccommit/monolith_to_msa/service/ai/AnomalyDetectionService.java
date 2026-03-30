@@ -31,7 +31,8 @@ public class AnomalyDetectionService {
     /**
      * 정상 패턴 학습 (최근 1시간 데이터 기반)
      */
-    @Scheduled(fixedRate = 3600000) // 1시간마다
+    /** 첫 실행은 앱 기동 직후가 아니라 initialDelay 이후(실습 시 곧바로 학습 가능하도록). */
+    @Scheduled(fixedRate = 3_600_000L, initialDelay = 90_000L)
     public void learnNormalPattern() {
         LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
         List<TrafficMetric> recentMetrics = metricRepository.findByTimestampBetween(

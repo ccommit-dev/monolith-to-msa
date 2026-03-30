@@ -117,6 +117,8 @@ public class TrafficMetricsController {
             prometheus.append(String.format("traffic_tps{endpoint=\"%s\"} %.2f\n", endpoint, metric.getTps()));
             prometheus.append(String.format("traffic_latency_avg{endpoint=\"%s\"} %.2f\n", endpoint, metric.getAvgLatency()));
             prometheus.append(String.format("traffic_error_rate{endpoint=\"%s\"} %.2f\n", endpoint, metric.getErrorRate()));
+            double anomalyScore = metric.getAnomalyScore() != null ? metric.getAnomalyScore() : 0.0;
+            prometheus.append(String.format("traffic_anomaly_score{endpoint=\"%s\"} %.4f\n", endpoint, anomalyScore));
         }
         
         return ResponseEntity.ok(prometheus.toString());

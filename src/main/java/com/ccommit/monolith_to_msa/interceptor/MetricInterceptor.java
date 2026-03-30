@@ -34,6 +34,11 @@ public class MetricInterceptor implements HandlerInterceptor {
                 long responseTime = System.currentTimeMillis() - start;
                 String endpoint = request.getRequestURI();
                 
+                // 메트릭 조회 API는 Prometheus 스크랩 등으로 호출 빈도가 높아 집계에서 제외
+                if (endpoint.startsWith("/api/metrics")) {
+                    return;
+                }
+                
                 // API 엔드포인트만 수집
                 if (endpoint.startsWith("/api/")) {
                     boolean success = response.getStatus() >= 200 && response.getStatus() < 400;
