@@ -9,10 +9,38 @@ Ch06.12: 성능 비교 리포트 분석 스크립트
 import csv
 import json
 import sys
-import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from dataclasses import dataclass
+
+
+def _csv_int(row: Dict[str, str], key: str, default: int = 0) -> int:
+    """Locust CSV 셀은 숫자 문자열; 빈 값·BOM 키 대비."""
+    val = row.get(key)
+    if val is None or val == "":
+        return default
+    try:
+        return int(float(val))
+    except ValueError:
+        return default
+
+
+def _failure_rate_percent(row: Dict[str, str]) -> float:
+    """
+    Locust *_stats.csv 는 보통 Failure Rate 컬럼이 없고 Request/Failure Count 만 있다.
+    명시 컬럼이 있으면 사용하고, 없으면 실패 수 / 요청 수 * 100.
+    """
+    raw = row.get("Failure Rate")
+    if raw is not None and str(raw).strip() != "":
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    req = _csv_int(row, "Request Count", 0)
+    fail = _csv_int(row, "Failure Count", 0)
+    if req <= 0:
+        return 0.0
+    return 100.0 * fail / req
 
 
 @dataclass
@@ -44,25 +72,72 @@ class EndpointMetrics:
     requests_per_second: float
 
 
+def _locust_csv_search_bases() -> List[Path]:
+    """Locust CSV 검색 기준: cwd 우선, 스크립트가 있는 디렉터리(보통 locust/) 폴백."""
+    seen: Set[str] = set()
+    out: List[Path] = []
+    for b in (Path.cwd(), Path(__file__).resolve().parent):
+        r = b.resolve()
+        key = str(r)
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
+def _try_stats_file(p: Path) -> Optional[Path]:
+    if not p.is_file():
+        return None
+    if p.name.endswith("_stats.csv") or p.name == "stats.csv":
+        return p.resolve()
+    return None
+
+
 def resolve_locust_stats_csv(path_or_prefix: str) -> Optional[Path]:
     """
-    Locust --csv=NAME 은 현재 작업 디렉터리에 NAME_stats.csv 를 생성한다.
-    인자: CSV 접두사(예: results_before_vu100), 또는 *_stats.csv 경로, 또는 stats.csv가 있는 디렉터리.
+    Locust --csv=NAME 은 보통 NAME_stats.csv 를 생성한다 (실행 시 cwd에 저장되는 경우가 많음).
+    인자: 접두사(예: results_before_vu100), *_stats.csv 경로, stats.csv가 있는 디렉터리.
+    cwd와 스크립트 디렉터리 양쪽에서 접두사 파일을 찾는다.
     """
-    p = Path(path_or_prefix)
-    if p.is_file():
-        if p.name.endswith("_stats.csv") or p.name == "stats.csv":
-            return p
+    raw = Path(path_or_prefix).expanduser()
+
+    # 1) 경로로 직접 지정 (절대 또는 cwd 기준 상대)
+    hit = _try_stats_file(raw)
+    if hit:
+        return hit
+    if raw.is_dir():
+        direct = raw / "stats.csv"
+        if direct.is_file():
+            return direct.resolve()
         return None
-    if p.is_dir():
-        direct = p / "stats.csv"
-        if direct.exists():
-            return direct
-        return None
-    candidate = Path(f"{path_or_prefix}_stats.csv")
-    if candidate.exists():
-        return candidate
+
+    bases = _locust_csv_search_bases()
+    tried_suffix = f"{path_or_prefix}_stats.csv"
+
+    # 2) 각 기준 디렉터리에서 상대 경로 그대로의 파일 (예: sub/results_before_vu100_stats.csv)
+    for base in bases:
+        hit = _try_stats_file((base / path_or_prefix).resolve())
+        if hit:
+            return hit
+
+    # 3) 접두사 → {prefix}_stats.csv (Locust 기본 출력명)
+    for base in bases:
+        hit = _try_stats_file((base / tried_suffix).resolve())
+        if hit:
+            return hit
+
     return None
+
+
+def _resolve_failure_hint(path_or_prefix: str) -> str:
+    lines = [
+        "  다음 파일이 필요합니다 (Locust: --csv=<접두사> → <접두사>_stats.csv).",
+        "  아래 경로를 확인했으나 없습니다:",
+    ]
+    for base in _locust_csv_search_bases():
+        lines.append(f"    - {base / f'{path_or_prefix}_stats.csv'}")
+    lines.append("  locust 를 locust 폴더에서 실행했는지, 또는 전체 경로로 *_stats.csv 를 넘겼는지 확인하세요.")
+    return "\n".join(lines)
 
 
 class PerformanceComparator:
@@ -77,20 +152,20 @@ class PerformanceComparator:
         metrics = {}
         
         try:
-            with open(csv_file, 'r', encoding='utf-8') as f:
+            with open(csv_file, 'r', encoding='utf-8-sig') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     endpoint = row.get('Name', '')
                     if endpoint and endpoint != 'Aggregated':
                         metrics[endpoint] = EndpointMetrics(
                             endpoint=endpoint,
-                            requests=int(row.get('Request Count', 0)),
-                            failures=int(row.get('Failure Count', 0)),
-                            failure_rate=float(row.get('Failure Rate', 0)),
-                            avg_response_time=float(row.get('Average Response Time', 0)),
-                            p95_response_time=float(row.get('95%', 0)),
-                            p99_response_time=float(row.get('99%', 0)),
-                            requests_per_second=float(row.get('Requests/s', 0))
+                            requests=_csv_int(row, 'Request Count', 0),
+                            failures=_csv_int(row, 'Failure Count', 0),
+                            failure_rate=_failure_rate_percent(row),
+                            avg_response_time=float(row.get('Average Response Time', 0) or 0),
+                            p95_response_time=float(row.get('95%', 0) or 0),
+                            p99_response_time=float(row.get('99%', 0) or 0),
+                            requests_per_second=float(row.get('Requests/s', 0) or 0)
                         )
         except Exception as e:
             print(f"CSV 파싱 오류: {csv_file}, {e}")
@@ -102,26 +177,29 @@ class PerformanceComparator:
         stats_file = resolve_locust_stats_csv(path_or_prefix)
         
         if not stats_file:
-            print(f"통계 파일을 찾을 수 없습니다: {path_or_prefix} (예: results_before_vu100 또는 results_before_vu100_stats.csv)")
+            print(f"통계 파일을 찾을 수 없습니다: {path_or_prefix}")
+            print(_resolve_failure_hint(path_or_prefix))
             return None
         
         try:
-            with open(stats_file, 'r', encoding='utf-8') as f:
+            with open(stats_file, 'r', encoding='utf-8-sig') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     if row.get('Name') == 'Aggregated':
+                        tr = _csv_int(row, 'Request Count', 0)
+                        tf = _csv_int(row, 'Failure Count', 0)
                         return PerformanceMetrics(
-                            total_requests=int(row.get('Request Count', 0)),
-                            total_failures=int(row.get('Failure Count', 0)),
-                            failure_rate=float(row.get('Failure Rate', 0)),
-                            avg_response_time=float(row.get('Average Response Time', 0)),
-                            median_response_time=float(row.get('Median Response Time', 0)),
-                            min_response_time=float(row.get('Min Response Time', 0)),
-                            max_response_time=float(row.get('Max Response Time', 0)),
-                            p95_response_time=float(row.get('95%', 0)),
-                            p99_response_time=float(row.get('99%', 0)),
-                            requests_per_second=float(row.get('Requests/s', 0)),
-                            total_time=float(row.get('Total Request Time', 0))
+                            total_requests=tr,
+                            total_failures=tf,
+                            failure_rate=_failure_rate_percent(row),
+                            avg_response_time=float(row.get('Average Response Time', 0) or 0),
+                            median_response_time=float(row.get('Median Response Time', 0) or 0),
+                            min_response_time=float(row.get('Min Response Time', 0) or 0),
+                            max_response_time=float(row.get('Max Response Time', 0) or 0),
+                            p95_response_time=float(row.get('95%', 0) or 0),
+                            p99_response_time=float(row.get('99%', 0) or 0),
+                            requests_per_second=float(row.get('Requests/s', 0) or 0),
+                            total_time=float(row.get('Total Request Time', 0) or 0)
                         )
         except Exception as e:
             print(f"Aggregated 메트릭 추출 오류: {e}")
@@ -210,12 +288,26 @@ class PerformanceComparator:
         print(f"  After:  {comparison['after']['total_requests']:,}")
 
 
+def _configure_stdio_utf8() -> None:
+    """Windows 기본 인코딩(cp949)에서 이모지 출력 시 UnicodeEncodeError 방지."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError, AttributeError):
+                pass
+
+
 def main():
     """메인 함수"""
+    _configure_stdio_utf8()
     if len(sys.argv) < 3:
         print("사용법: python compare_performance.py <before_prefix> <after_prefix> [output.json]")
         print("예시: python compare_performance.py results_before_vu100 results_after_vu100")
-        print("      (locust --csv=results_before_vu100 로 생성된 results_before_vu100_stats.csv 를 찾음)")
+        print("")
+        print("전제: 접두사에 대응하는 Locust 통계 파일이 이미 있어야 합니다.")
+        print("  예) results_before_vu100 → results_before_vu100_stats.csv (locust --csv=... 로 생성)")
+        print("  이 스크립트는 CSV를 만들지 않습니다. 먼저 headless Locust로 Before/After 부하를 각각 실행하세요.")
         sys.exit(1)
     
     before_arg = sys.argv[1]

@@ -52,7 +52,7 @@ spring:
         web-allow-others: true
         trace: false
   
-  # Redis 설정 (Pub/Sub)
+  # Redis 설정 (Pub/Sub + 캐시)
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -63,6 +63,12 @@ spring:
           max-active: 8
           max-idle: 8
           min-idle: 0
+
+  # Redis 캐시 (CacheConfig → 상품/재고 @Cacheable)
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000
 
 # Payment Service URL (환경 변수로 주입 가능)
 payment:
