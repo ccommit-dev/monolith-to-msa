@@ -9,6 +9,8 @@ import com.ccommit.monolith_to_msa.exception.InsufficientStockException;
 import com.ccommit.monolith_to_msa.exception.ProductNotFoundException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.product.ProductRepository;
+import com.ccommit.monolith_to_msa.service.event.EventPublisher;
+import com.ccommit.monolith_to_msa.service.product.ProductService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +37,12 @@ class OrderServiceTest {
 
     @Mock
     private ProductRepository productRepository;
+
+    @Mock
+    private ProductService productService;
+
+    @Mock
+    private EventPublisher eventPublisher;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -89,6 +97,9 @@ class OrderServiceTest {
         // 메서드 호출 확인
         verify(productRepository, times(1)).findByProductIdWithLock(productId);
         verify(orderRepository, times(1)).save(any(Order.class));
+        verify(productService, times(1)).evictStockCache(productId);
+        verify(productService, times(1)).evictProductCache(productId);
+        verify(eventPublisher, times(1)).publishOrderCreated(any());
     }
 
     @Test
@@ -112,6 +123,8 @@ class OrderServiceTest {
 
         verify(productRepository, times(1)).findByProductIdWithLock(productId);
         verify(orderRepository, never()).save(any(Order.class));
+        verify(productService, never()).evictStockCache(any());
+        verify(productService, never()).evictProductCache(any());
     }
 
     @Test
@@ -144,6 +157,8 @@ class OrderServiceTest {
 
         verify(productRepository, times(1)).findByProductIdWithLock(productId);
         verify(orderRepository, never()).save(any(Order.class));
+        verify(productService, never()).evictStockCache(any());
+        verify(productService, never()).evictProductCache(any());
     }
 
     @Test
@@ -176,6 +191,8 @@ class OrderServiceTest {
         // 재고 차감이 롤백되어야 함 (실제로는 @Transactional이 처리)
         verify(productRepository, times(1)).findByProductIdWithLock(productId);
         verify(orderRepository, times(1)).save(any(Order.class));
+        verify(productService, times(1)).evictStockCache(productId);
+        verify(productService, times(1)).evictProductCache(productId);
     }
 }
 

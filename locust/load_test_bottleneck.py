@@ -75,7 +75,8 @@ class OrderTaskSet(SequentialTaskSet):
             "customerId": customer_id,
             "productId": product_id,
             "quantity": quantity,
-            "totalPrice": total_price
+            "totalPrice": total_price,
+            "paymentMethod": "CREDIT_CARD",
         }
         
         with self.client.post(
@@ -121,7 +122,8 @@ class PaymentTaskSet(SequentialTaskSet):
                 "customerId": customer_id,
                 "productId": product_id,
                 "quantity": quantity,
-                "totalPrice": total_price
+                "totalPrice": total_price,
+                "paymentMethod": "CREDIT_CARD",
             }
             
             order_response = self.client.post("/api/orders", json=order_payload)

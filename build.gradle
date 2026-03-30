@@ -30,6 +30,8 @@ dependencies {
 
 	// Actuator (Health Check)
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	// Prometheus 텍스트 포맷(/actuator/prometheus) — 없으면 HTTP 메트릭이 스크랩되지 않음
+	implementation 'io.micrometer:micrometer-registry-prometheus'
 	
 	// Validation
 	implementation 'org.springframework.boot:spring-boot-starter-validation'

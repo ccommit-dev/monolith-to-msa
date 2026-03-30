@@ -16,6 +16,7 @@ import com.ccommit.monolith_to_msa.exception.ProductNotFoundException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.product.ProductRepository;
 import com.ccommit.monolith_to_msa.service.event.EventPublisher;
+import com.ccommit.monolith_to_msa.service.product.ProductService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class OrderServiceImpl implements OrderService {
 
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
+    private final ProductService productService;
     private final Optional<PaymentClient> paymentClient;
     private final EventPublisher eventPublisher;
     
@@ -44,10 +46,12 @@ public class OrderServiceImpl implements OrderService {
     public OrderServiceImpl(
             OrderRepository orderRepository,
             ProductRepository productRepository,
+            ProductService productService,
             Optional<PaymentClient> paymentClient,
             EventPublisher eventPublisher) {
         this.orderRepository = orderRepository;
         this.productRepository = productRepository;
+        this.productService = productService;
         this.paymentClient = paymentClient;
         this.eventPublisher = eventPublisher;
     }
@@ -70,6 +74,9 @@ public class OrderServiceImpl implements OrderService {
 
         // 3. 재고 차감
         product.decreaseStock(request.getQuantity());
+        // 재고는 Repository로 갱신되나 stock/product 캐시는 ProductService 경로만 무효화됨 → 주문 후 캐시 정합성 유지
+        productService.evictStockCache(request.getProductId());
+        productService.evictProductCache(request.getProductId());
 
         // 4. 주문 생성
         Order order = Order.builder()

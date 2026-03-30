@@ -1,6 +1,7 @@
 package com.ccommit.monolith_to_msa.controller.order;
 
 import com.ccommit.monolith_to_msa.domain.order.OrderStatus;
+import com.ccommit.monolith_to_msa.domain.payment.PaymentMethod;
 import com.ccommit.monolith_to_msa.dto.order.OrderCreateRequest;
 import com.ccommit.monolith_to_msa.dto.order.OrderResponse;
 import com.ccommit.monolith_to_msa.exception.GlobalExceptionHandler;
@@ -56,6 +57,7 @@ class OrderControllerTest {
         request.setProductId("product-001");
         request.setQuantity(2);
         request.setTotalPrice(20000L);
+        request.setPaymentMethod(PaymentMethod.CREDIT_CARD);
 
         OrderResponse response = OrderResponse.builder()
                 .id(1L)
@@ -77,7 +79,8 @@ class OrderControllerTest {
                                 "customerId": "customer-001",
                                 "productId": "product-001",
                                 "quantity": 2,
-                                "totalPrice": 20000
+                                "totalPrice": 20000,
+                                "paymentMethod": "CREDIT_CARD"
                             }
                             """))
                 .andExpect(status().isCreated())
@@ -112,6 +115,7 @@ class OrderControllerTest {
         request.setProductId("product-999");
         request.setQuantity(1);
         request.setTotalPrice(10000L);
+        request.setPaymentMethod(PaymentMethod.CREDIT_CARD);
 
         when(orderService.createOrder(any(OrderCreateRequest.class)))
                 .thenThrow(new ProductNotFoundException("product-999"));
@@ -124,7 +128,8 @@ class OrderControllerTest {
                                 "customerId": "customer-001",
                                 "productId": "product-999",
                                 "quantity": 1,
-                                "totalPrice": 10000
+                                "totalPrice": 10000,
+                                "paymentMethod": "CREDIT_CARD"
                             }
                             """))
                 .andExpect(status().isNotFound())
@@ -144,6 +149,7 @@ class OrderControllerTest {
         request.setProductId("product-001");
         request.setQuantity(10);
         request.setTotalPrice(100000L);
+        request.setPaymentMethod(PaymentMethod.CREDIT_CARD);
 
         when(orderService.createOrder(any(OrderCreateRequest.class)))
                 .thenThrow(new InsufficientStockException("product-001", 10, 5));
@@ -156,7 +162,8 @@ class OrderControllerTest {
                                 "customerId": "customer-001",
                                 "productId": "product-001",
                                 "quantity": 10,
-                                "totalPrice": 100000
+                                "totalPrice": 100000,
+                                "paymentMethod": "CREDIT_CARD"
                             }
                             """))
                 .andExpect(status().isBadRequest())
