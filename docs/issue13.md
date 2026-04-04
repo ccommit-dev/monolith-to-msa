@@ -70,6 +70,14 @@
 http://localhost:8080/actuator/health
 ```
 
+**주의:** 기본 설정은 H2 메모리 DB라 애플리케이션 재기동 시 데이터가 초기화됩니다. 실습 중 재기동 후에도 데이터 유지가 필요하면 `src/main/resources/application.yaml`의 H2 설정에서 파일 모드 주석을 해제하세요.
+
+```yaml
+spring:
+  datasource:
+    # url: jdbc:h2:file:./data/testdb  # ← 주석 해제 시 재기동해도 데이터 유지
+```
+
 ---
 
 ## 2단계: 트래픽 발생 — 수집·저장 파이프라인 이해
