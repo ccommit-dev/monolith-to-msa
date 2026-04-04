@@ -1,5 +1,84 @@
 # Ch07.02: AI 이상징후 탐지
 
+## 실행 요약(현행 코드 기준)
+- 이 문서는 고급(AI 고도화) 설계까지 담고 있으나, 현재 저장소 코드로 즉시 실행 가능한 흐름은 아래와 같습니다.
+- 아래 0~5단계를 먼저 수행해 이상 탐지를 재현하세요. 이후 본문(고급 설계)은 로드맵으로 참고하세요.
+
+### 현행 실행 순서
+1) 앱 기동
+```bash
+./gradlew bootRun
+```
+**Windows PowerShell**
+```powershell
+.\gradlew.bat bootRun
+```
+2) 트래픽 발생(예시)
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/products/product-001
+curl -s -X POST http://localhost:8080/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"customerId":"customer-001","productId":"product-001","quantity":1,"totalPrice":10000,"paymentMethod":"CREDIT_CARD"}'
+```
+**Windows PowerShell**
+```powershell
+# GET 예시
+Invoke-RestMethod -Uri "http://localhost:8080/api/products/product-001" -Method Get
+
+# POST 예시
+$body = @{
+  customerId = "customer-001"
+  productId  = "product-001"
+  quantity   = 1
+  totalPrice = 10000
+  paymentMethod = "CREDIT_CARD"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8080/api/orders" -Method Post -Body $body -ContentType "application/json"
+```
+3) 1분 이상 대기 후 메트릭/파이프라인 확인
+```bash
+curl -s "http://localhost:8080/api/metrics/traffic" | head -c 400
+curl -s "http://localhost:8080/api/metrics/pipeline/status"
+```
+**Windows PowerShell**
+```powershell
+(Invoke-WebRequest "http://localhost:8080/api/metrics/traffic").Content
+Invoke-RestMethod "http://localhost:8080/api/metrics/pipeline/status"
+```
+4) (선택) Prometheus/Grafana 기동
+```bash
+docker compose -f docker-compose-monitoring.yml up -d
+```
+**Windows PowerShell**
+```powershell
+docker compose -f docker-compose-monitoring.yml up -d
+```
+5) 이상 탐지 관찰
+- 앱 기동 후 약 90초 지나면 첫 학습이 수행되고, 이후 1분마다 이상 탐지가 동작합니다.
+```bash
+curl -s "http://localhost:8080/api/metrics/anomalies"
+```
+**Windows PowerShell**
+```powershell
+Invoke-RestMethod "http://localhost:8080/api/metrics/anomalies"
+```
+6) Prometheus 텍스트 확인(커스텀 메트릭)
+```bash
+curl -s "http://localhost:8080/api/metrics/prometheus"
+```
+**Windows PowerShell**
+```powershell
+(Invoke-WebRequest "http://localhost:8080/api/metrics/prometheus").Content
+```
+
+### 현행 엔드포인트(구현되어 있음)
+- GET `/api/metrics/traffic`, `/api/metrics/anomalies`
+- GET `/api/metrics/pipeline/status`, `/api/metrics/pipeline/statistics`
+- GET `/api/metrics/prometheus`
+
+주의: 본문에 등장하는 `/api/ai/...` 계열(예: baseline/alerts/connection-pool/status)은 현재 코드에 구현되어 있지 않은 로드맵 항목입니다. 실행 시에는 위 “현행 엔드포인트”를 사용하세요.
+
 ## 실습 목표
 - Baseline Learning: 7일간의 정상 패턴 학습 및 기준선 설정
 - AI 자동 감지: 실시간 모니터링 → 이상 자동 감지 → 알림
@@ -159,6 +238,8 @@
 ---
 
 ## 실습 순서
+
+중요: 아래 실습 순서는 “고도화 설계” 예시입니다. 현재 저장소에는 `/api/ai/...` 엔드포인트가 없으므로, 실제 실행은 문서 상단의 “현행 실행 순서”와 `issue13.md`의 절차를 따르세요. 고급 항목은 로드맵 참고용입니다.
 
 ### 1단계: Baseline 패턴 학습
 
