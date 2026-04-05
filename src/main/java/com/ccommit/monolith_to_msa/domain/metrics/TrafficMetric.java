@@ -16,7 +16,8 @@ import java.time.LocalDateTime;
 @Table(name = "traffic_metrics", indexes = {
     @Index(name = "idx_timestamp", columnList = "timestamp"),
     @Index(name = "idx_endpoint", columnList = "endpoint"),
-    @Index(name = "idx_timestamp_endpoint", columnList = "timestamp, endpoint")
+    @Index(name = "idx_timestamp_endpoint", columnList = "timestamp, endpoint"),
+    @Index(name = "idx_is_anomaly_timestamp", columnList = "is_anomaly, timestamp")
 })
 @Data
 @Builder

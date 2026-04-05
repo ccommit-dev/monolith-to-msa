@@ -20,6 +20,11 @@ curl -s -X POST http://localhost:8080/api/orders \
   -H "Content-Type: application/json" \
   -d '{"customerId":"customer-001","productId":"product-001","quantity":1,"totalPrice":10000,"paymentMethod":"CREDIT_CARD"}'
 ```
+**Windows CMD** (Windows 10+ 기본 `curl.exe`; HTTP 코드는 응답 본문/길이로 확인)
+```bat
+curl -s http://localhost:8080/api/products/product-001
+curl -s -X POST http://localhost:8080/api/orders -H "Content-Type: application/json" -d "{\"customerId\":\"customer-001\",\"productId\":\"product-001\",\"quantity\":1,\"totalPrice\":10000,\"paymentMethod\":\"CREDIT_CARD\"}"
+```
 **Windows PowerShell**
 ```powershell
 # GET 예시
@@ -41,6 +46,11 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/orders" -Method Post -Body $bo
 curl -s "http://localhost:8080/api/metrics/traffic" | head -c 400
 curl -s "http://localhost:8080/api/metrics/pipeline/status"
 ```
+**Windows CMD**
+```bat
+curl -s "http://localhost:8080/api/metrics/traffic"
+curl -s "http://localhost:8080/api/metrics/pipeline/status"
+```
 **Windows PowerShell**
 ```powershell
 (Invoke-WebRequest "http://localhost:8080/api/metrics/traffic").Content
@@ -50,7 +60,7 @@ Invoke-RestMethod "http://localhost:8080/api/metrics/pipeline/status"
 ```bash
 docker compose -f docker-compose-monitoring.yml up -d
 ```
-**Windows PowerShell**
+**Windows PowerShell / CMD** (Docker Desktop 설치 가정, 명령 동일)
 ```powershell
 docker compose -f docker-compose-monitoring.yml up -d
 ```
@@ -59,12 +69,20 @@ docker compose -f docker-compose-monitoring.yml up -d
 ```bash
 curl -s "http://localhost:8080/api/metrics/anomalies"
 ```
+**Windows CMD**
+```bat
+curl -s "http://localhost:8080/api/metrics/anomalies"
+```
 **Windows PowerShell**
 ```powershell
 Invoke-RestMethod "http://localhost:8080/api/metrics/anomalies"
 ```
 6) Prometheus 텍스트 확인(커스텀 메트릭)
 ```bash
+curl -s "http://localhost:8080/api/metrics/prometheus"
+```
+**Windows CMD**
+```bat
 curl -s "http://localhost:8080/api/metrics/prometheus"
 ```
 **Windows PowerShell**
@@ -251,6 +269,11 @@ curl -s "http://localhost:8080/api/metrics/prometheus"
 # 정상 트래픽 생성 (7일간)
 # Locust 부하 테스트 또는 실제 사용자 트래픽
 ```
+**Windows PowerShell** (프로젝트 루트)
+```powershell
+.\gradlew.bat bootRun
+# 트래픽은 Locust 등으로 동일하게 생성
+```
 
 #### 1.2 Baseline 패턴 수동 학습
 ```bash
@@ -260,11 +283,20 @@ curl -X POST "http://localhost:8080/api/ai/baseline/learn?endpoint=/api/orders"
 # 모든 엔드포인트 학습
 curl -X POST "http://localhost:8080/api/ai/baseline/learn"
 ```
+**Windows PowerShell** (로드맵 API — 현재 미구현일 수 있음)
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8080/api/ai/baseline/learn?endpoint=/api/orders" -Method Post
+Invoke-RestMethod -Uri "http://localhost:8080/api/ai/baseline/learn" -Method Post
+```
 
 #### 1.3 Baseline 패턴 확인
 ```bash
 # Baseline 패턴 조회
 curl "http://localhost:8080/api/ai/baseline?endpoint=/api/orders"
+```
+**Windows PowerShell**
+```powershell
+Invoke-RestMethod "http://localhost:8080/api/ai/baseline?endpoint=/api/orders"
 ```
 
 ---
@@ -283,6 +315,25 @@ locust -f load_test.py \
     --spawn-rate=5 \
     --run-time=10m
 ```
+**Windows PowerShell**
+```powershell
+cd locust
+# 가상환경 (선택): python -m venv venv  후
+.\venv\Scripts\Activate.ps1
+# 실행 정책 오류 시: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+python -m locust -f load_test.py `
+  --host=http://localhost:8080 `
+  --headless `
+  --users=50 `
+  --spawn-rate=5 `
+  --run-time=10m
+```
+**Windows CMD**
+```bat
+cd locust
+venv\Scripts\activate.bat
+python -m locust -f load_test.py --host=http://localhost:8080 --headless --users=50 --spawn-rate=5 --run-time=10m
+```
 
 #### 2.2 이상 트래픽 생성
 ```bash
@@ -294,6 +345,21 @@ locust -f load_test_bottleneck.py \
     --spawn-rate=20 \
     --run-time=5m
 ```
+**Windows PowerShell**
+```powershell
+cd locust
+python -m locust -f load_test_bottleneck.py `
+  --host=http://localhost:8080 `
+  --headless `
+  --users=200 `
+  --spawn-rate=20 `
+  --run-time=5m
+```
+**Windows CMD**
+```bat
+cd locust
+python -m locust -f load_test_bottleneck.py --host=http://localhost:8080 --headless --users=200 --spawn-rate=20 --run-time=5m
+```
 
 #### 2.3 이상치 감지 확인
 ```bash
@@ -302,6 +368,18 @@ curl "http://localhost:8080/api/ai/anomalies"
 
 # 최근 1시간 이상치 조회
 curl "http://localhost:8080/api/ai/anomalies?start=2024-01-01T00:00:00&end=2024-01-01T23:59:59"
+```
+**Windows PowerShell**
+```powershell
+Invoke-RestMethod "http://localhost:8080/api/ai/anomalies"
+Invoke-RestMethod "http://localhost:8080/api/ai/anomalies?start=2024-01-01T00:00:00&end=2024-01-01T23:59:59"
+```
+**현행 코드**에서는 위 대신 다음을 사용하세요.
+```bash
+curl -s "http://localhost:8080/api/metrics/anomalies"
+```
+```powershell
+Invoke-RestMethod "http://localhost:8080/api/metrics/anomalies"
 ```
 
 ---
@@ -313,6 +391,10 @@ curl "http://localhost:8080/api/ai/anomalies?start=2024-01-01T00:00:00&end=2024-
 # 커넥션 풀 상태 조회
 curl "http://localhost:8080/api/ai/connection-pool/status"
 ```
+**Windows PowerShell**
+```powershell
+Invoke-RestMethod "http://localhost:8080/api/ai/connection-pool/status"
+```
 
 #### 3.2 고갈 상황 재현
 ```bash
@@ -323,6 +405,21 @@ locust -f load_test_bottleneck.py \
     --users=300 \
     --spawn-rate=30 \
     --run-time=10m
+```
+**Windows PowerShell**
+```powershell
+cd locust
+python -m locust -f load_test_bottleneck.py `
+  --host=http://localhost:8080 `
+  --headless `
+  --users=300 `
+  --spawn-rate=30 `
+  --run-time=10m
+```
+**Windows CMD**
+```bat
+cd locust
+python -m locust -f load_test_bottleneck.py --host=http://localhost:8080 --headless --users=300 --spawn-rate=30 --run-time=10m
 ```
 
 #### 3.3 자동 감지 확인
@@ -343,6 +440,21 @@ locust -f load_test.py \
     --spawn-rate=5 \
     --run-time=30m
 ```
+**Windows PowerShell**
+```powershell
+cd locust
+python -m locust -f load_test.py `
+  --host=http://localhost:8080 `
+  --headless `
+  --users=50 `
+  --spawn-rate=5 `
+  --run-time=30m
+```
+**Windows CMD**
+```bat
+cd locust
+python -m locust -f load_test.py --host=http://localhost:8080 --headless --users=50 --spawn-rate=5 --run-time=30m
+```
 
 #### 4.2 오탐률 계산
 ```bash
@@ -354,6 +466,20 @@ anomaly_metrics = curl "http://localhost:8080/api/ai/anomalies" | jq '. | length
 
 # 오탐률 = (이상치 수 / 전체 수) * 100
 # 목표: 5% 이하
+```
+**Windows PowerShell** (`jq` 없이)
+```powershell
+$traffic = Invoke-RestMethod "http://localhost:8080/api/metrics/traffic"
+$anomalies = Invoke-RestMethod "http://localhost:8080/api/metrics/anomalies"
+# 배열이면 .Count, 단일 객체/빈 응답이면 형태에 맞게 조정
+$total = @($traffic).Count
+$anom = @($anomalies).Count
+if ($total -gt 0) { ($anom / $total) * 100 }
+```
+**Windows**에서 `jq`를 쓰려면 [jq](https://jqlang.org/) 설치 후 CMD/PowerShell에서 동일한 파이프 사용 가능.
+```powershell
+curl.exe -s "http://localhost:8080/api/metrics/traffic" | jq ". | length"
+curl.exe -s "http://localhost:8080/api/metrics/anomalies" | jq ". | length"
 ```
 
 ---

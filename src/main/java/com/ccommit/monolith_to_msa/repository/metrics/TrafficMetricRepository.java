@@ -1,7 +1,11 @@
 package com.ccommit.monolith_to_msa.repository.metrics;
 
 import com.ccommit.monolith_to_msa.domain.metrics.TrafficMetric;
+import jakarta.persistence.QueryHint;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -35,6 +39,16 @@ public interface TrafficMetricRepository extends JpaRepository<TrafficMetric, Lo
     List<TrafficMetric> findByIsAnomalyTrueAndTimestampBetween(
             LocalDateTime start, 
             LocalDateTime end
+    );
+
+    /**
+     * 이상치 메트릭 조회 (최신순 + 페이지)
+     */
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "2000"))
+    Page<TrafficMetric> findByIsAnomalyTrueAndTimestampBetweenOrderByTimestampDesc(
+            LocalDateTime start,
+            LocalDateTime end,
+            Pageable pageable
     );
     
     /**

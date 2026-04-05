@@ -8,6 +8,7 @@ import com.ccommit.monolith_to_msa.service.alert.AlertService;
 import com.ccommit.monolith_to_msa.service.baseline.BaselineLearningService;
 import com.ccommit.monolith_to_msa.service.connection.ConnectionPoolMonitorService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -60,19 +61,40 @@ public class AnomalyDetectionController {
      * 이상치 메트릭 조회
      */
     @GetMapping("/anomalies")
-    public ResponseEntity<List<TrafficMetric>> getAnomalies(
+    public ResponseEntity<?> getAnomalies(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end,
+            @RequestParam(defaultValue = "200") int limit
     ) {
+        // 대용량 응답으로 인한 타임아웃을 막기 위해 조회 건수를 제한한다.
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+
         if (start == null) {
-            start = LocalDateTime.now().minusHours(24);
+            start = LocalDateTime.now().minusHours(1);
         }
         if (end == null) {
             end = LocalDateTime.now();
         }
+
+        if (start.isAfter(end)) {
+            return ResponseEntity.badRequest().build();
+        }
         
-        List<TrafficMetric> anomalies = metricRepository.findByIsAnomalyTrueAndTimestampBetween(start, end);
-        return ResponseEntity.ok(anomalies);
+        try {
+            List<TrafficMetric> anomalies = metricRepository
+                    .findByIsAnomalyTrueAndTimestampBetweenOrderByTimestampDesc(
+                            start,
+                            end,
+                            PageRequest.of(0, safeLimit)
+                    )
+                    .getContent();
+            return ResponseEntity.ok(anomalies);
+        } catch (RuntimeException ex) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "ANOMALY_QUERY_TIMEOUT");
+            error.put("message", "이상치 조회가 지연되어 요청을 중단했습니다. limit 값을 줄여 다시 시도하세요.");
+            return ResponseEntity.status(503).body(error);
+        }
     }
     
     /**
