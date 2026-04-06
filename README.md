@@ -457,32 +457,6 @@ server:
 
 ---
 
-### Ch07.03: AI 자동알림 대응 (Issue15)
-- **목표**: Alert Fatigue 해결 및 자동 Incident 생성·복구 구현
-- **소요 시간**: 약 60분
-- **주요 내용**:
-  - 인텔리전트 알림 (중요도 우선순위 분류, 알림 그룹화로 100건 → 5건)
-  - 자동 Incident 생성 및 우선순위 분류 (CRITICAL/HIGH/MEDIUM/LOW)
-  - Auto-remediation (커넥션 풀 고갈·리소스 고갈 자동 복구, 최대 3회 시도)
-  - PagerDuty / Opsgenie 연동 (CRITICAL·HIGH On-call 자동 호출)
-
-[📄 상세 가이드: PRACTICE_GUIDE_ISSUE15.md](./PRACTICE_GUIDE_ISSUE15.md)
-
----
-
-### Ch07.04: AI 근본원인 분석 (Issue16)
-- **목표**: AI 기반 장애 자동 진단 및 엔지니어 협업 모델 구축
-- **소요 시간**: 약 60분
-- **주요 내용**:
-  - 로그 + 메트릭 통합 분석으로 근본 원인 자동 추론
-  - AI 추천 vs 엔지니어 판단 비교 및 협업 모델 구현
-  - Before/After 아키텍처 전환 효과 AI 자동 측정
-  - AI 시대의 엔지니어 역할 (AI Supervisor + Problem Solver)
-
-[📄 상세 가이드: PRACTICE_GUIDE_ISSUE16.md](./PRACTICE_GUIDE_ISSUE16.md)
-
----
-
 ## 📋 실습 전 준비사항
 
 ### 필수 환경
