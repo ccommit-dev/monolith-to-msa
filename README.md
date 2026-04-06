@@ -574,5 +574,3 @@ git checkout issue1  # 또는 issue2, issue3 등
 **Ch07: AI 기반 트래픽 이상 탐지**
 - [ ] Ch07.01: AI 트래픽 데이터 수집
 - [ ] Ch07.02: AI 이상징후 탐지
-- [ ] Ch07.03: AI 자동알림 대응
-- [ ] Ch07.04: AI 근본원인 분석
