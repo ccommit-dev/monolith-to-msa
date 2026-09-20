@@ -84,6 +84,11 @@ src/main/java/com/ccommit/monolith_to_msa/service/payment/
 3. 별도 RetryablePaymentGatewayService를 통한 PG사 결제 요청 (@Retryable)
 4. 결제 완료 처리 (COMPLETED) 또는 실패 처리 (FAILED)
 
+**결제 결과 처리 시 주의 사항:**
+- `requestPayment()`의 반환값은 거래 ID 문자열이므로 `paymentResult.getTransactionId()`가 아니라
+  `String transactionId = requestPayment(...)` 형태로 사용합니다.
+- `PaymentResponse.orderId`에는 결제 ID가 아닌 `payment.getOrder().getId()`를 매핑합니다.
+
 **트랜잭션:**
 - ✅ `@Transactional`: 전체 작업을 하나의 트랜잭션으로 처리
 - 실패 시 자동 롤백
