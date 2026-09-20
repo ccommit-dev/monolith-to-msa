@@ -37,6 +37,10 @@ dependencies {
 	// JPA
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	
+	// Retry
+	implementation 'org.springframework.retry:spring-retry:2.0.5'
+	implementation 'org.springframework:spring-aspects'
+	
 	// Database
 	implementation 'com.h2database:h2'
 	runtimeOnly 'com.mysql:mysql-connector-j'
@@ -55,4 +59,9 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+// Retry 활성화
+tasks.named('compileJava') {
+	options.annotationProcessorPath = configurations.annotationProcessor
 }
