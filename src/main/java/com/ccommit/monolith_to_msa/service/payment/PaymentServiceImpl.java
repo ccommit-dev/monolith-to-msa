@@ -10,8 +10,6 @@ import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import com.ccommit.monolith_to_msa.repository.payment.PaymentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.retry.annotation.Backoff;
-import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,15 +25,10 @@ public class PaymentServiceImpl implements PaymentService {
     
     private final PaymentRepository paymentRepository;
     private final OrderRepository orderRepository;
-    private final PaymentGatewayService paymentGatewayService;
+    private final RetryablePaymentGatewayService retryablePaymentGatewayService;
     
     @Override
     @Transactional
-    @Retryable(
-        retryFor = PaymentGatewayException.class,
-        maxAttempts = 3,
-        backoff = @Backoff(delay = 1000, multiplier = 2)
-    )
     public PaymentResponse processPayment(PaymentCreateRequest request) {
         log.info("결제 처리 시작: 주문ID={}, 금액={}", request.getOrderId(), request.getAmount());
         
@@ -56,7 +49,7 @@ public class PaymentServiceImpl implements PaymentService {
         
         try {
             // 3. PG사 결제 요청 (재시도 가능)
-            String transactionId = paymentGatewayService.requestPayment(
+            String transactionId = retryablePaymentGatewayService.requestPayment(
                     request.getAmount(),
                     request.getMethod()
             );
@@ -87,11 +80,6 @@ public class PaymentServiceImpl implements PaymentService {
     
     @Override
     @Transactional
-    @Retryable(
-        retryFor = PaymentGatewayException.class,
-        maxAttempts = 3,
-        backoff = @Backoff(delay = 1000, multiplier = 2)
-    )
     public PaymentResponse refundPayment(Long paymentId) {
         log.info("환불 처리 시작: 결제ID={}", paymentId);
         
@@ -104,7 +92,7 @@ public class PaymentServiceImpl implements PaymentService {
         
         try {
             // PG사 환불 요청 (재시도 가능)
-            paymentGatewayService.requestRefund(payment.getTransactionId());
+            retryablePaymentGatewayService.requestRefund(payment.getTransactionId());
             
             // 환불 처리
             payment.refund();
@@ -119,4 +107,3 @@ public class PaymentServiceImpl implements PaymentService {
         }
     }
 }
-

@@ -81,7 +81,7 @@ src/main/java/com/ccommit/monolith_to_msa/service/payment/
 **결제 처리 로직 순서:**
 1. 주문 조회
 2. 결제 엔티티 생성 (PENDING 상태)
-3. PG사 결제 요청 (@Retryable)
+3. 별도 RetryablePaymentGatewayService를 통한 PG사 결제 요청 (@Retryable)
 4. 결제 완료 처리 (COMPLETED) 또는 실패 처리 (FAILED)
 
 **트랜잭션:**
@@ -89,8 +89,9 @@ src/main/java/com/ccommit/monolith_to_msa/service/payment/
 - 실패 시 자동 롤백
 
 **재시도 로직:**
-- ✅ `@Retryable`: PaymentGatewayException 발생 시 최대 3회 재시도
-- ✅ `@Backoff`: 지수 백오프 (1초, 2초, 4초)
+- ✅ `@Retryable`: PaymentGatewayException 발생 시 최초 호출을 포함해 최대 3회 시도
+- ✅ `@Backoff`: 재시도 전 지수 백오프 (1초, 2초)
+- ✅ 별도 Spring Bean에서 실행하여 Retry AOP 프록시가 실제 적용됨
 
 **실습:**
 ```bash
@@ -118,6 +119,9 @@ src/main/java/com/ccommit/monolith_to_msa/config/RetryConfig.java
     backoff = @Backoff(delay = 1000, multiplier = 2)
 )
 ```
+
+`@Retryable` 메서드에서는 `PaymentGatewayException`을 다른 예외로 변환하지 않습니다.
+최대 재시도가 끝난 뒤 `PaymentServiceImpl`에서 예외를 처리합니다.
 
 **실습:**
 ```bash
@@ -406,4 +410,3 @@ src/test/java/com/ccommit/monolith_to_msa/
 
 - **시퀀스 다이어그램:** `issue5.puml` 파일 참조
 - **상세 개념 설명:** 각 단계별 파일 확인
-
