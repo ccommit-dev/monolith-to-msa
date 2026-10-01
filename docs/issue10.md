@@ -9,6 +9,31 @@
 
 ---
 
+## 영상 기준 서비스 분리 방식
+
+이 강의의 제공 코드는 영상 기준으로 **단일 루트 프로젝트를 프로필과 Dockerfile로 나누어 실행하는 구조**다. 별도 `order-service/`, `payment-service/` Gradle 프로젝트를 수정하는 방식이 아니다.
+
+```text
+monolith-to-msa/
+├── src/main/java/com/ccommit/monolith_to_msa/...
+├── src/main/resources/application-order.yaml
+├── src/main/resources/application-payment.yaml
+├── Dockerfile.order
+├── Dockerfile.payment
+└── docker-compose-msa.yml
+```
+
+따라서 영상에서 루트 프로젝트의 `OrderServiceImpl`, `PaymentClient`, 설정 파일을 수정하는 것이 맞다. Docker Compose는 같은 루트 소스를 각각 다른 프로필로 실행한다.
+
+| 컨테이너 | 빌드 파일 | 실행 프로필 | 포트 | 역할 |
+|---|---|---|---|---|
+| `order-service` | `Dockerfile.order` | `order` | `8080` | 주문 API, Payment 호출 |
+| `payment-service` | `Dockerfile.payment` | `payment` | `8081` | 결제 API |
+
+즉, 루트 `src/main/java/.../OrderServiceImpl.java`를 수정한 뒤 `docker compose -f docker-compose-msa.yml up --build`를 실행하면 그 변경이 `order-service` 컨테이너에 반영된다.
+
+---
+
 ## 실습 진행 순서 (파일 기준)
 
 아래 순서대로 읽고·실행하면 저장소 상태와 맞습니다.
@@ -23,7 +48,7 @@
 | 5 | 주문 흐름 연동 | `OrderServiceImpl`, `OrderCreateRequest` | `paymentMethod` 필수, `Optional<PaymentClient>` |
 | 6 | 검증 | `./gradlew test`, 로컬 curl / Docker | 테스트 통과, Fallback·CB 동작 |
 
-프로필: Order 실습 시 **`spring.profiles.active=order`**(또는 해당 프로필로 기동)을 사용합니다.
+프로필: Order 실습 시 **`spring.profiles.active=order`**, Payment 실습 시 **`spring.profiles.active=payment`**로 기동한다.
 
 **표기:** 본 문서에서 **`〔신규〕`** 는 이번 통신 실습에서 **추가한 코드**, **`〔수정〕`** 은 **변경·보강한 블록**을 가리킵니다.
 
@@ -160,7 +185,7 @@ bootJar {
 
 ```yaml
 # Order Service 설정 (실습용 예제)
-# 실제 서비스 분리 시 별도 프로젝트의 application.yaml로 구성
+# 단일 루트 프로젝트를 order 프로필로 실행할 때 적용
 
 server:
   port: 8080
@@ -785,7 +810,7 @@ curl -X POST http://localhost:8080/api/orders ^
 
 ### 6.3 Payment 장애 + Fallback (실습 방법)
 
-**전제:** Order 서비스는 **실행 중**, `payment.service.url`(기본 `http://localhost:8081`)이 가리키는 Payment 프로세스만 막으면 됩니다. 프로필은 `order`(또는 Docker면 `docker`) 등 **PaymentClient 빈이 뜨는 구성**이어야 합니다.
+**전제:** Order 서비스는 **실행 중**, `payment.service.url`(기본 `http://localhost:8081`)이 가리키는 Payment 프로세스만 막으면 됩니다. 프로필은 `order`처럼 **PaymentClient 빈이 뜨는 구성**이어야 합니다.
 
 #### (1) 장애 내는 방법 (택 1)
 
@@ -912,7 +937,7 @@ curl.exe -s http://localhost:8080/actuator/circuitbreakers | ConvertFrom-Json | 
 
 - `management.endpoints.web.exposure.include`에 **`circuitbreakers`**, **`circuitbreakerevents`** 포함 (`application.yaml` 또는 `application-order.yaml`).
 - **`resilience4j.circuitbreaker.instances.paymentService`** 정의 + `build.gradle`의 **`resilience4j-spring-boot3` 2.3.0 이상** (Spring Boot 4에서 서킷 Actuator 연동용).
-- `docker` 프로필 컨테이너는 **`application-docker.yaml`** 로 `SERVER_PORT`·바인드 주소가 맞는지 확인(Compose 예제와 동기화).
+- Docker Compose 컨테이너는 `order`/`payment` 프로필로 실행되므로, `application-order.yaml`과 `application-payment.yaml`의 포트·바인드 주소가 Compose 예제와 맞는지 확인.
 
 **4. 호출 예시 (HTTP 코드까지 보기)**
 
