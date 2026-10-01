@@ -10,7 +10,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_PROFILES_ACTIVE=order
       - SPRING_DATASOURCE_URL=jdbc:h2:mem:orderdb
       - PAYMENT_SERVICE_URL=http://payment-service:8081
     networks:
@@ -43,7 +43,7 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_PROFILES_ACTIVE=payment
       - SPRING_DATASOURCE_URL=jdbc:h2:mem:paymentdb
     networks:
       - msa-network
@@ -71,4 +71,3 @@ networks:
 # 2. 주문 서비스만 확장: docker compose -f docker-compose-msa.yml up -d --scale order-service=3
 # 3. 로그 확인: docker compose -f docker-compose-msa.yml logs -f order-service
 # 4. 중지: docker compose -f docker-compose-msa.yml down
-

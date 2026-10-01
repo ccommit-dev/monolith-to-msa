@@ -1,5 +1,5 @@
 # Order Service Dockerfile
-# 실습용 예제 - 실제 서비스 분리 시 별도 프로젝트로 구성
+# 실습용 예제 - 단일 루트 프로젝트를 Order 프로필로 실행
 
 # Build stage
 FROM gradle:8.5-jdk17 AS build
@@ -29,10 +29,9 @@ COPY --from=build /app/build/libs/*-SNAPSHOT.jar app.jar
 # Order Service Port
 EXPOSE 8080
 
-# 환경 변수 설정
-ENV SPRING_PROFILES_ACTIVE=docker
+# 환경 변수 설정: 루트 프로젝트를 Order 서비스 역할로 실행
+ENV SPRING_PROFILES_ACTIVE=order
 ENV SPRING_DATASOURCE_URL=jdbc:h2:mem:orderdb
 ENV PAYMENT_SERVICE_URL=http://payment-service:8081
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
-
