@@ -426,7 +426,7 @@ public class RedisListenerConfig {
 
 ```yaml
 # Order Service 설정 (실습용 예제)
-# 실제 서비스 분리 시 별도 프로젝트의 application.yaml로 구성
+# 단일 루트 프로젝트를 order 프로필로 실행할 때 적용
 
 server:
   port: 8080
@@ -565,7 +565,7 @@ resilience4j:
 
 ```yaml
 # Payment Service 설정 (실습용 예제)
-# 실제 서비스 분리 시 별도 프로젝트의 application.yaml로 구성
+# 단일 루트 프로젝트를 payment 프로필로 실행할 때 적용
 
 server:
   port: 8081
