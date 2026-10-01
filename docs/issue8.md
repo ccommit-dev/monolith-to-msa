@@ -60,6 +60,11 @@
 
 ### 1단계: 환경 설정
 
+> 코드 흐름 참고: issue6~7에서 사용하던 `DataInitializer`는 issue8부터 제거되고,
+> 초기 상품 데이터는 `src/main/resources/data.sql`과 `spring.sql.init.mode=always` 설정으로 주입됩니다.
+> 병목 재현 실습에서는 매 실행마다 동일한 테스트 데이터를 쓰는 것이 중요하므로,
+> 자바 초기화 코드 대신 SQL 초기화 파일을 기준으로 진행합니다.
+
 #### 1.1 HikariCP 커넥션 풀 설정 확인
 
 **파일 위치:**
@@ -454,4 +459,3 @@ management:
 - [HikariCP 공식 문서](https://github.com/brettwooldridge/HikariCP)
 - [Spring Boot Actuator 메트릭](https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html)
 - [Locust 공식 문서](https://docs.locust.io/)
-
