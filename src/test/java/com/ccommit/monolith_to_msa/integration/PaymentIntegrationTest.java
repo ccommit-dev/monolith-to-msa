@@ -15,6 +15,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @SpringBootTest를 사용한 전체 스택 테스트
  */
 @SpringBootTest
+@ActiveProfiles("payment")
 @Transactional
 class PaymentIntegrationTest {
     
@@ -79,7 +81,7 @@ class PaymentIntegrationTest {
     void getPayment_Success() {
         // Given: 결제 생성
         Payment payment = Payment.builder()
-                .order(testOrder)
+                .orderId(testOrder.getId())
                 .amount(20000L)
                 .method(PaymentMethod.CREDIT_CARD)
                 .status(PaymentStatus.COMPLETED)
@@ -103,7 +105,7 @@ class PaymentIntegrationTest {
     void refundPayment_Success() {
         // Given: 완료된 결제 생성
         Payment payment = Payment.builder()
-                .order(testOrder)
+                .orderId(testOrder.getId())
                 .amount(20000L)
                 .method(PaymentMethod.CREDIT_CARD)
                 .status(PaymentStatus.COMPLETED)
@@ -147,4 +149,3 @@ class PaymentIntegrationTest {
         }
     }
 }
-

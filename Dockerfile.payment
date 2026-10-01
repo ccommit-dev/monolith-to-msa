@@ -1,5 +1,5 @@
 # Payment Service Dockerfile
-# 실습용 예제 - 실제 서비스 분리 시 별도 프로젝트로 구성
+# 실습용 예제 - 단일 루트 프로젝트를 Payment 프로필로 실행
 
 # Build stage
 FROM gradle:8.5-jdk17 AS build
@@ -29,9 +29,8 @@ COPY --from=build /app/build/libs/*-SNAPSHOT.jar app.jar
 # Payment Service Port
 EXPOSE 8081
 
-# 환경 변수 설정
+# 환경 변수 설정: 루트 프로젝트를 Payment 서비스 역할로 실행
 ENV SPRING_PROFILES_ACTIVE=payment
 ENV SPRING_DATASOURCE_URL=jdbc:h2:mem:paymentdb
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
-

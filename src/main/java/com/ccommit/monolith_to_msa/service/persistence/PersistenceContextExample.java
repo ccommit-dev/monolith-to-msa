@@ -2,9 +2,6 @@ package com.ccommit.monolith_to_msa.service.persistence;
 
 import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.order.OrderStatus;
-import com.ccommit.monolith_to_msa.domain.payment.Payment;
-import com.ccommit.monolith_to_msa.domain.payment.PaymentMethod;
-import com.ccommit.monolith_to_msa.domain.payment.PaymentStatus;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -87,33 +84,6 @@ public class PersistenceContextExample {
     }
 
     /**
-     * 연관관계 영속성 전이 (Cascade) 예제
-     * Order를 저장하면 연관된 Payment도 함께 저장
-     */
-    @Transactional
-    public void cascadeExample() {
-        Order order = Order.builder()
-                .customerId("customer-001")
-                .productId("product-001")
-                .quantity(1)
-                .totalPrice(10000L)
-                .build();
-
-        Payment payment = Payment.builder()
-                .order(order)
-                .amount(10000L)
-                .method(PaymentMethod.CREDIT_CARD)
-                .status(PaymentStatus.PENDING)
-                .build();
-
-        // Order에 Payment 추가
-        order.addPayment(payment);
-
-        // Order만 저장해도 Payment도 함께 저장 (CASCADE)
-        orderRepository.save(order);
-    }
-
-    /**
      * 영속성 컨텍스트 플러시 예제
      * flush()를 호출하면 쓰기 지연 SQL 저장소의 쿼리를 즉시 실행
      */
@@ -149,4 +119,3 @@ public class PersistenceContextExample {
         order.updateStatus(OrderStatus.CANCELLED);
     }
 }
-

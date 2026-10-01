@@ -1,10 +1,15 @@
 package com.ccommit.monolith_to_msa.service.order;
 
+import com.ccommit.monolith_to_msa.client.PaymentClient;
 import com.ccommit.monolith_to_msa.domain.order.Order;
 import com.ccommit.monolith_to_msa.domain.order.OrderStatus;
+import com.ccommit.monolith_to_msa.domain.payment.PaymentMethod;
+import com.ccommit.monolith_to_msa.domain.payment.PaymentStatus;
 import com.ccommit.monolith_to_msa.domain.product.Product;
 import com.ccommit.monolith_to_msa.dto.order.OrderCreateRequest;
 import com.ccommit.monolith_to_msa.dto.order.OrderResponse;
+import com.ccommit.monolith_to_msa.dto.payment.PaymentCreateRequest;
+import com.ccommit.monolith_to_msa.dto.payment.PaymentResponse;
 import com.ccommit.monolith_to_msa.exception.InsufficientStockException;
 import com.ccommit.monolith_to_msa.exception.ProductNotFoundException;
 import com.ccommit.monolith_to_msa.repository.order.OrderRepository;
@@ -35,6 +40,9 @@ class OrderServiceTest {
 
     @Mock
     private ProductRepository productRepository;
+
+    @Mock
+    private PaymentClient paymentClient;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -73,6 +81,14 @@ class OrderServiceTest {
                 .thenReturn(Optional.of(product));
         when(orderRepository.save(any(Order.class)))
                 .thenReturn(savedOrder);
+        when(paymentClient.processPayment(any(PaymentCreateRequest.class)))
+                .thenReturn(PaymentResponse.builder()
+                        .id(1L)
+                        .orderId(1L)
+                        .amount(totalPrice)
+                        .method(PaymentMethod.CREDIT_CARD)
+                        .status(PaymentStatus.PENDING)
+                        .build());
 
         // When: 주문 생성 실행
         OrderResponse response = orderService.createOrder(request);
@@ -178,4 +194,3 @@ class OrderServiceTest {
         verify(orderRepository, times(1)).save(any(Order.class));
     }
 }
-

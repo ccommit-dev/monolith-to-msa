@@ -1,18 +1,28 @@
+version: '3.8'
+
 services:
+  # 단일 루트 프로젝트를 Order 프로필로 실행하는 교육용 분리 서비스
   order-service:
     build:
-      context: ./order-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.order
+    container_name: order-service
     ports:
       - "8080:8080"
     environment:
-      - SPRING_PROFILES_ACTIVE=default
+      - SPRING_PROFILES_ACTIVE=order
       - SPRING_DATASOURCE_URL=jdbc:h2:mem:orderdb
       - PAYMENT_SERVICE_URL=http://payment-service:8081
     networks:
       - msa-network
     depends_on:
       - payment-service
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -21,17 +31,28 @@ services:
         reservations:
           cpus: '1'
           memory: 1G
+    # 독립 확장 예시 (주석 해제하여 사용)
+    # scale: 3
+
+  # 단일 루트 프로젝트를 Payment 프로필로 실행하는 교육용 분리 서비스
   payment-service:
     build:
-      context: ./payment-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.payment
+    container_name: payment-service
     ports:
       - "8081:8081"
     environment:
-      - SPRING_PROFILES_ACTIVE=default
+      - SPRING_PROFILES_ACTIVE=payment
       - SPRING_DATASOURCE_URL=jdbc:h2:mem:paymentdb
     networks:
       - msa-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -50,4 +71,3 @@ networks:
 # 2. 주문 서비스만 확장: docker compose -f docker-compose-msa.yml up -d --scale order-service=3
 # 3. 로그 확인: docker compose -f docker-compose-msa.yml logs -f order-service
 # 4. 중지: docker compose -f docker-compose-msa.yml down
-
