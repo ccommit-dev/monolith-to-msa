@@ -121,7 +121,7 @@
 #### 1.1 데이터베이스 마이그레이션
 ```bash
 # 애플리케이션 실행 시 자동으로 테이블 생성
-# V2__create_traffic_metrics_table.sql 실행
+# V4__create_traffic_metrics_table.sql 실행
 ```
 
 #### 1.2 인터셉터 등록 확인
