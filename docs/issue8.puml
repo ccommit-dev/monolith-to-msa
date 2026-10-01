@@ -1,0 +1,292 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.08: 병목 재현 - VU 100 vs VU 200 비교
+
+== VU 100: 정상 동작 ==
+
+actor "사용자\n(VU 100)" as User100
+participant "Locust" as Locust
+participant "Spring Boot\n애플리케이션" as App
+database "HikariCP\n커넥션 풀\n(max 10)" as Pool
+database "H2 Database" as DB
+
+User100 -> Locust: 부하 테스트 시작\n(VU 100)
+activate Locust
+
+Locust -> App: HTTP 요청\n(50~100 TPS)
+activate App
+
+App -> Pool: 커넥션 요청
+activate Pool
+
+note right of Pool
+    커넥션 풀 상태:
+    - 사용 중: 5~7개
+    - 유휴: 3~5개
+    - 사용률: 50~70%
+end note
+
+Pool --> App: 커넥션 할당
+deactivate Pool
+
+App -> DB: SQL 쿼리 실행
+activate DB
+DB --> App: 결과 반환
+deactivate DB
+
+App -> Pool: 커넥션 반환
+activate Pool
+Pool --> App: 반환 완료
+deactivate Pool
+
+App --> Locust: HTTP 응답\n(100~300ms)
+deactivate App
+
+Locust --> User100: 성능 지표
+note right of Locust
+    베이스라인 성능:
+    - TPS: 50~100
+    - 평균 응답: 100~300ms
+    - 95% 응답: <500ms
+    - 에러율: <1%
+end note
+
+deactivate Locust
+
+== VU 200: 병목 현상 ==
+
+actor "사용자\n(VU 200)" as User200
+participant "Locust" as Locust2
+participant "Spring Boot\n애플리케이션" as App2
+database "HikariCP\n커넥션 풀\n(max 10)" as Pool2
+database "H2 Database" as DB2
+
+User200 -> Locust2: 부하 테스트 시작\n(VU 200)
+activate Locust2
+
+Locust2 -> App2: HTTP 요청\n(100~200 TPS)
+activate App2
+
+App2 -> Pool2: 커넥션 요청
+activate Pool2
+
+note right of Pool2
+    커넥션 풀 상태:
+    - 사용 중: 10개 (100%)
+    - 유휴: 0개
+    - 대기 중: 10~50개
+    - 사용률: 100%
+end note
+
+alt 커넥션 사용 가능
+    Pool2 --> App2: 커넥션 할당
+    deactivate Pool2
+    
+    App2 -> DB2: SQL 쿼리 실행\n(비관적 락)
+    activate DB2
+    
+    note right of DB2
+        긴 트랜잭션:
+        - 상품 조회 (락)
+        - 재고 차감
+        - 주문 생성
+        - 커넥션 점유 시간 증가
+    end note
+    
+    DB2 --> App2: 결과 반환
+    deactivate DB2
+    
+    App2 -> Pool2: 커넥션 반환
+    activate Pool2
+    Pool2 --> App2: 반환 완료
+    deactivate Pool2
+    
+    App2 --> Locust2: HTTP 응답\n(1~5초)
+    deactivate App2
+    
+else 커넥션 부족
+    Pool2 --> App2: 커넥션 대기\n(30초 타임아웃)
+    note right of Pool2
+        커넥션 풀 고갈:
+        - 모든 커넥션 사용 중
+        - 대기 중인 요청 증가
+        - 타임아웃 발생 가능
+    end note
+    
+    alt 타임아웃 전 커넥션 획득
+        Pool2 --> App2: 커넥션 할당 (지연)
+        App2 -> DB2: SQL 쿼리 실행
+        DB2 --> App2: 결과 반환
+        App2 --> Locust2: HTTP 응답\n(5~10초)
+    else 타임아웃 발생
+        App2 --> Locust2: 500 Internal Server Error\n(Connection timeout)
+        note right of App2
+            에러 발생:
+            - Connection is not available
+            - Pool empty timeout
+            - 에러율: 10~30%
+        end note
+    end
+    deactivate Pool2
+    deactivate App2
+end
+
+Locust2 --> User200: 성능 지표
+note right of Locust2
+    병목 현상 성능:
+    - TPS: 20~30 (급감)
+    - 평균 응답: 1~5초 (급증)
+    - 95% 응답: 10초+ (급증)
+    - 에러율: 10~30% (급증)
+end note
+
+deactivate Locust2
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.08: 모놀리식 vs MSA 아키텍처 비교
+
+== 모놀리식 아키텍처 (현재) ==
+
+package "Spring Boot 애플리케이션" {
+    [상품 서비스] as ProductService
+    [주문 서비스] as OrderService
+    [결제 서비스] as PaymentService
+}
+
+database "H2 Database\n(단일 DB)" as MonolithDB {
+    [products] as Products
+    [orders] as Orders
+    [payments] as Payments
+}
+
+database "HikariCP\n커넥션 풀\n(max 10)" as Pool
+
+ProductService --> Pool
+OrderService --> Pool
+PaymentService --> Pool
+
+Pool --> MonolithDB
+
+note right of Pool
+    문제점:
+    - 모든 서비스가 하나의 커넥션 풀 공유
+    - 서비스 간 커넥션 경쟁
+    - 한 서비스의 부하가 전체에 영향
+    - 확장성 제약 (수직 확장만 가능)
+end note
+
+== MSA 아키텍처 (제안) ==
+
+package "상품 서비스" {
+    [Product API] as ProductAPI
+    database "HikariCP\n커넥션 풀\n(max 20)" as ProductPool
+    database "Product DB" as ProductDB {
+        [products]
+    }
+    ProductAPI --> ProductPool
+    ProductPool --> ProductDB
+}
+
+package "주문 서비스" {
+    [Order API] as OrderAPI
+    database "HikariCP\n커넥션 풀\n(max 20)" as OrderPool
+    database "Order DB" as OrderDB {
+        [orders]
+    }
+    OrderAPI --> OrderPool
+    OrderPool --> OrderDB
+}
+
+package "결제 서비스" {
+    [Payment API] as PaymentAPI
+    database "HikariCP\n커넥션 풀\n(max 20)" as PaymentPool
+    database "Payment DB" as PaymentDB {
+        [payments]
+    }
+    PaymentAPI --> PaymentPool
+    PaymentPool --> PaymentDB
+}
+
+ProductAPI ..> OrderAPI : API 호출
+OrderAPI ..> PaymentAPI : API 호출
+
+note right of ProductPool
+    장점:
+    - 서비스별 독립적인 커넥션 풀
+    - 서비스 간 커넥션 경쟁 없음
+    - 독립적인 스케일링 가능
+    - 장애 격리 가능
+end note
+
+@enduml
+
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Ch06.08: 커넥션 풀 고갈 시나리오
+
+== 정상 상태 (VU 100) ==
+
+rectangle "커넥션 풀 (max 10)" {
+    component "커넥션 1" as C1 #LightGreen
+    component "커넥션 2" as C2 #LightGreen
+    component "커넥션 3" as C3 #LightGreen
+    component "커넥션 4" as C4 #LightGreen
+    component "커넥션 5" as C5 #LightGreen
+    component "커넥션 6" as C6 #LightGray
+    component "커넥션 7" as C7 #LightGray
+    component "커넥션 8" as C8 #LightGray
+    component "커넥션 9" as C9 #LightGray
+    component "커넥션 10" as C10 #LightGray
+}
+
+note right
+    상태:
+    - 사용 중: 5개
+    - 유휴: 5개
+    - 사용률: 50%
+    - 대기 중: 0개
+end note
+
+== 병목 상태 (VU 200) ==
+
+rectangle "커넥션 풀 (max 10)" {
+    component "커넥션 1" as C1B #Red
+    component "커넥션 2" as C2B #Red
+    component "커넥션 3" as C3B #Red
+    component "커넥션 4" as C4B #Red
+    component "커넥션 5" as C5B #Red
+    component "커넥션 6" as C6B #Red
+    component "커넥션 7" as C7B #Red
+    component "커넥션 8" as C8B #Red
+    component "커넥션 9" as C9B #Red
+    component "커넥션 10" as C10B #Red
+}
+
+queue "대기 큐" {
+    [요청 1] as R1 #Yellow
+    [요청 2] as R2 #Yellow
+    [요청 3] as R3 #Yellow
+    [요청 ...] as R4 #Yellow
+    [요청 N] as RN #Yellow
+}
+
+note right
+    상태:
+    - 사용 중: 10개 (100%)
+    - 유휴: 0개
+    - 사용률: 100%
+    - 대기 중: 10~50개
+    - 타임아웃 발생 가능
+end note
+
+@enduml
+
