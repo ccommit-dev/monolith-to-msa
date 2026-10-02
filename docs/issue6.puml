@@ -1,0 +1,356 @@
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title Ch06.06: Cache Aside 패턴 시퀀스 다이어그램
+
+actor Client
+participant "ProductController" as Controller
+participant "ProductService" as Service
+participant "Redis Cache" as Cache
+participant "ProductRepository" as Repository
+database "Product\n(DB)" as DB
+
+Client -> Controller: GET /api/products/{productId}
+activate Controller
+
+Controller -> Service: getProductByProductId(productId)
+activate Service
+
+note right of Service
+    @Cacheable(value = "product")
+    캐시에서 먼저 조회
+end note
+
+Service -> Cache: 캐시 조회\nkey: productId
+activate Cache
+
+alt 캐시 히트
+    Cache --> Service: Product 데이터 반환
+    deactivate Cache
+    
+    note right of Service
+        캐시에서 조회 성공
+        DB 조회 안 함
+        응답 시간: ~10ms
+    end note
+    
+    Service --> Controller: Product (캐시)
+    Controller --> Client: 200 OK\n(캐시 데이터)
+    
+else 캐시 미스
+    Cache --> Service: 캐시 없음
+    deactivate Cache
+    
+    note right of Service
+        캐시 미스
+        DB에서 조회 필요
+    end note
+    
+    Service -> Repository: findByProductId(productId)
+    activate Repository
+    
+    Repository -> DB: SELECT * FROM products
+    activate DB
+    DB --> Repository: Product Entity
+    deactivate DB
+    
+    Repository --> Service: Product Entity
+    deactivate Repository
+    
+    note right of Service
+        DB 조회 완료
+        응답 시간: ~200ms
+    end note
+    
+    Service -> Cache: 캐시 저장\nkey: productId, value: Product
+    activate Cache
+    Cache --> Service: 저장 완료
+    deactivate Cache
+    
+    note right of Service
+        다음 조회부터는
+        캐시에서 조회됨
+    end note
+    
+    Service --> Controller: Product (DB)
+    Controller --> Client: 200 OK\n(DB 데이터)
+end
+
+deactivate Service
+deactivate Controller
+
+@enduml
+
+' ==========================================
+' 캐시 무효화 시퀀스
+' ==========================================
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title 캐시 무효화 시퀀스 (재고 변경 시)
+
+participant "OrderService" as OrderService
+participant "ProductService" as ProductService
+participant "Redis Cache" as Cache
+participant "ProductRepository" as Repository
+database "Product\n(DB)" as DB
+
+OrderService -> Repository: findByProductIdWithLock()
+activate Repository
+Repository -> DB: SELECT ... FOR UPDATE
+DB --> Repository: Product Entity
+Repository --> OrderService: Product Entity
+deactivate Repository
+
+OrderService -> DB: UPDATE products\n재고 차감
+activate DB
+DB --> OrderService: 업데이트 완료
+deactivate DB
+
+note right of OrderService
+    재고 변경 완료
+    캐시 무효화 필요
+end note
+
+OrderService -> ProductService: evictProductCache(productId)
+activate ProductService
+
+note right of ProductService
+    @CacheEvict(value = "product")
+    캐시 삭제
+end note
+
+ProductService -> Cache: 캐시 삭제\nkey: productId
+activate Cache
+Cache --> ProductService: 삭제 완료
+deactivate Cache
+
+ProductService -> ProductService: evictStockCache(productId)
+ProductService -> Cache: 캐시 삭제\nkey: productId (stock)
+activate Cache
+Cache --> ProductService: 삭제 완료
+deactivate Cache
+
+ProductService --> OrderService: 캐시 무효화 완료
+deactivate ProductService
+
+note right of OrderService
+    다음 조회 시
+    DB에서 최신 데이터 조회
+    캐시에 다시 저장
+end note
+
+@enduml
+
+' ==========================================
+' 성능 비교 다이어그램
+' ==========================================
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title 성능 비교: Before vs After
+
+participant "Client" as Client
+participant "ProductService" as Service
+participant "Redis Cache" as Cache
+database "Product\n(DB)" as DB
+
+== Before: 캐시 없음 ==
+
+Client -> Service: getProductByProductId()
+activate Service
+
+Service -> DB: SELECT * FROM products
+activate DB
+note right of DB
+    매번 DB 조회
+    응답 시간: ~200ms
+end note
+DB --> Service: Product Entity
+deactivate DB
+
+Service --> Client: Product\n(200ms)
+deactivate Service
+
+== After: 캐시 적용 ==
+
+Client -> Service: getProductByProductId()
+activate Service
+
+Service -> Cache: 캐시 조회
+activate Cache
+
+Cache --> Service: Product (캐시)
+deactivate Cache
+
+note right of Service
+    캐시 히트
+    응답 시간: ~10ms
+    성능 향상: 20배
+end note
+
+Service --> Client: Product\n(10ms)
+deactivate Service
+
+@enduml
+
+' ==========================================
+' TTL 전략 다이어그램
+' ==========================================
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title TTL 전략 (Time To Live)
+
+package "캐시별 TTL 설정" {
+    rectangle "product 캐시\n(60초)" as ProductCache {
+        상품 정보
+        자주 변경되지 않음
+        최신성 중요
+    }
+    
+    rectangle "stock 캐시\n(300초)" as StockCache {
+        재고 정보
+        변경 빈도 높음
+        성능 중요
+    }
+    
+    rectangle "기본 캐시\n(3600초)" as DefaultCache {
+        일반 데이터
+        변경 빈도 낮음
+        장기 캐싱
+    }
+}
+
+note right of ProductCache
+    TTL: 60초
+    짧은 TTL로
+    최신성 보장
+end note
+
+note right of StockCache
+    TTL: 300초
+    적절한 TTL로
+    성능과 최신성 균형
+end note
+
+note right of DefaultCache
+    TTL: 3600초
+    긴 TTL로
+    성능 최적화
+end note
+
+@enduml
+
+' ==========================================
+' 핵심 메시지 4가지
+' ==========================================
+@startuml
+skinparam backgroundColor #FFFFFF
+
+title 핵심 메시지 4가지
+
+package "1. Cache Aside 패턴" {
+    class "캐시 조회" as CacheRead {
+        캐시에서 먼저 조회
+    }
+    
+    class "캐시 미스" as CacheMiss {
+        DB 조회
+    }
+    
+    class "캐시 저장" as CacheWrite {
+        DB 결과를 캐시에 저장
+    }
+    
+    CacheRead --> CacheMiss
+    CacheMiss --> CacheWrite
+    CacheWrite --> CacheRead
+    
+    note right of CacheRead
+        Cache Aside 패턴
+        1. 캐시 조회
+        2. 미스 시 DB 조회
+        3. 캐시 저장
+    end note
+}
+
+package "2. @Cacheable 구현" {
+    class "@Cacheable" as Cacheable {
+        value: 캐시 이름
+        key: 캐시 키
+        unless: 저장 조건
+    }
+    
+    class "캐시 히트" as CacheHit {
+        메서드 실행 안 함
+        캐시 데이터 반환
+    }
+    
+    class "캐시 미스" as CacheMiss2 {
+        메서드 실행
+        결과 캐시 저장
+    }
+    
+    Cacheable --> CacheHit
+    Cacheable --> CacheMiss2
+    
+    note right of Cacheable
+        @Cacheable
+        자동 캐싱
+        간편한 구현
+    end note
+}
+
+package "3. TTL 전략" {
+    class "product: 60초" as TTL60 {
+        상품 정보
+        최신성 중요
+    }
+    
+    class "stock: 300초" as TTL300 {
+        재고 정보
+        성능 중요
+    }
+    
+    class "기본: 3600초" as TTL3600 {
+        일반 데이터
+        장기 캐싱
+    }
+    
+    note right of TTL60
+        TTL 전략
+        데이터 특성에 맞는
+        TTL 설정
+    end note
+}
+
+package "4. 성능 향상" {
+    class "Before: 200ms" as Before {
+        DB 조회
+        매번 DB 접근
+    }
+    
+    class "After: 10ms" as After {
+        캐시 조회
+        DB 접근 감소
+    }
+    
+    class "20배 향상" as Improvement {
+        성능 개선
+        응답 시간 단축
+    }
+    
+    Before --> After
+    After --> Improvement
+    
+    note right of Before
+        성능 비교
+        Before: 200ms
+        After: 10ms
+        20배 향상
+    end note
+}
+
+@enduml
+
